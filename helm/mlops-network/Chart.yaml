@@ -1,0 +1,27 @@
+apiVersion: v2
+name: mlops-network
+description: Service mesh and ingress — Istio, AWS Load Balancer Controller, external-secrets
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+dependencies:
+  - name: istiod
+    repository: https://istio-release.storage.googleapis.com/charts
+    version: 1.21.0
+    condition: istiod.enabled
+
+  - name: istio-ingressgateway
+    repository: https://istio-release.storage.googleapis.com/charts
+    version: 1.21.0
+    condition: istioIngressGateway.enabled
+
+  - name: aws-load-balancer-controller
+    repository: https://aws.github.io/eks-charts
+    version: 1.7.2
+    condition: awsLoadBalancerController.enabled
+
+  - name: external-secrets
+    repository: https://charts.external-secrets.io
+    version: 0.9.13
+    condition: externalSecrets.enabled

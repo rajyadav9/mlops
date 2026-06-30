@@ -1,0 +1,29 @@
+global:
+  cluster_name: mlops-eks-prod
+  cloud: aws
+
+awsLoadBalancerController:
+  clusterName: mlops-eks-prod
+  replicaCount: 2
+  serviceAccount:
+    annotations:
+      eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/mlops-eks-prod-alb-controller"
+
+externalSecrets:
+  serviceAccount:
+    annotations:
+      eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/mlops-eks-prod-external-secrets"
+
+istiod:
+  meshConfig:
+    outboundTrafficPolicy:
+      mode: REGISTRY_ONLY  # strict egress in prod
+
+  pilot:
+    resources:
+      requests:
+        cpu: 1
+        memory: 4Gi
+      limits:
+        cpu: 2
+        memory: 8Gi

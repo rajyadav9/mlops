@@ -1,0 +1,98 @@
+# Production environment overrides
+# Never deploy to prod directly — open a PR targeting this file,
+# get approval from 2 engineers, then merge triggers the deploy workflow.
+#
+# helm upgrade --install vllm-inference ./helm/vllm-inference \
+#   -f helm/vllm-inference/environments/prod/values.yaml \
+#   -n vllm --create-namespace
+
+global:
+  cloud: "aws"
+  serviceAccountName: "prod-vllm"
+
+vllm:
+  image:
+    registry: "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com"
+    repository: "vllm-inference"
+    # Prod always pins to an immutable SHA — never :latest
+    tag: "REPLACE_WITH_PROMOTED_SHA"
+
+model_storage:
+  model_storage_location: "prod-mlops-model-weights"
+  qwen:
+    # Content-addressed UUID — updating this triggers a new init container run
+    model_path: "REPLACE_WITH_PROD_QWEN_S3_UUID"
+    lora_adapter_path: "REPLACE_WITH_PROD_LORA_UUID"
+  llama:
+    model_path: "REPLACE_WITH_PROD_LLAMA_S3_UUID"
+
+qwen:
+  enabled: true
+  tensorParallelSize: "1"
+  pipelineParallelSize: "1"
+  maxModelLen: "131072"   # full context window in prod
+
+  resources:
+    requests:
+      cpu: "16"
+      memory: "48Gi"
+      nvidia.com/gpu: "1"
+    limits:
+      cpu: "32"
+      memory: "64Gi"
+      nvidia.com/gpu: "1"
+
+  startupProbe:
+    failureThreshold: 90
+    initialDelaySeconds: 60
+    periodSeconds: 30
+    timeoutSeconds: 10
+
+  autoscaling:
+    minReplicas: 2   # HA: never below 2 pods in prod
+    maxReplicas: 8
+    kedaTrigger:
+      waitingRequestsThreshold: "5"
+      gpuCacheThreshold: "80"
+    scaleDownCooldown: 300
+
+  lora:
+    enabled: true
+    servedAdapters:
+      - adapterName: "qwen-3-14b-finance-lora"
+        mountPath: "/lora-adapter-cache"
+
+  env:
+    - name: VLLM_ATTENTION_BACKEND
+      value: FLASH_ATTN
+
+llama:
+  enabled: true
+  tensorParallelSize: "1"
+  maxModelLen: "8192"
+  resources:
+    requests:
+      cpu: "8"
+      memory: "32Gi"
+      nvidia.com/gpu: "1"
+    limits:
+      cpu: "16"
+      memory: "48Gi"
+      nvidia.com/gpu: "1"
+  autoscaling:
+    minReplicas: 1
+    maxReplicas: 4
+    scaleDownCooldown: 300
+
+ingress:
+  className: "alb"
+  host: "vllm.prod.internal.example.com"
+  annotations:
+    alb.ingress.kubernetes.io/scheme: "internal"
+    alb.ingress.kubernetes.io/target-type: "ip"
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-policy: "ELBSecurityPolicy-TLS13-1-2-2021-06"
+    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:REGION:ACCOUNT:certificate/CERT_ID"
+
+serviceMonitor:
+  enabled: true

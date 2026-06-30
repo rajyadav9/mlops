@@ -1,0 +1,45 @@
+# Production: AWS Load Balancer Controller creates an ALB from this Ingress.
+# Local (kind): nginx ingress controller handles this identically.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vllm
+  namespace: vllm
+  labels:
+    app.kubernetes.io/name: vllm
+  annotations:
+    # AWS ALB (production) — remove the nginx class annotation and use these:
+    # kubernetes.io/ingress.class: alb
+    # alb.ingress.kubernetes.io/scheme: internal          # never public-facing
+    # alb.ingress.kubernetes.io/target-type: ip
+    # alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:REGION:ACCOUNT:certificate/CERT_ID
+    # alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+    # alb.ingress.kubernetes.io/wafv2-acl-arn: arn:aws:wafv2:...  # add WAF for compliance
+
+    # Local / nginx ingress (kind):
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+    - host: vllm.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vllm
+                port:
+                  name: http
+---
+# PodDisruptionBudget: never allow all pods to be drained at once
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: vllm
+  namespace: vllm
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vllm

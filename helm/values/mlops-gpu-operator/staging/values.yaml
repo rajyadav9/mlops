@@ -1,0 +1,15 @@
+gpu-operator:
+  driver:
+    enabled: false
+
+  devicePlugin:
+    sharing:
+      timeSlicing:
+        resources:
+          - name: nvidia.com/gpu
+            replicas: 1   # no sharing in staging — matches prod behaviour
+
+  dcgmExporter:
+    enabled: true
+    serviceMonitor:
+      enabled: true

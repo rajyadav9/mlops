@@ -1,0 +1,25 @@
+gpu-operator:
+  driver:
+    enabled: false
+
+  devicePlugin:
+    sharing:
+      timeSlicing:
+        resources:
+          - name: nvidia.com/gpu
+            # No time-slicing in prod — each vLLM pod gets exclusive GPU access
+            replicas: 1
+
+  dcgmExporter:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+
+  operator:
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi

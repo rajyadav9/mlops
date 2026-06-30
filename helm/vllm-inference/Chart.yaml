@@ -1,0 +1,16 @@
+apiVersion: v2
+name: vllm-inference
+description: Production vLLM inference service — multi-model, multi-cloud, LoRA-aware
+type: application
+version: 0.1.0
+appVersion: "0.4.3"
+
+keywords:
+  - vllm
+  - llm
+  - inference
+  - gpu
+  - mlops
+
+maintainers:
+  - name: mlops-team

@@ -1,0 +1,48 @@
+global:
+  environment: staging
+  cloud: aws
+  cluster_name: mlops-eks-staging
+  base_domain: staging.internal.example.com
+
+grafanaAlerting:
+  enabled: true
+  paging: false
+  singleChannel: "#mlops-monitoring-staging"
+
+grafana:
+  replicas: 1
+  ingress:
+    hosts:
+      - "grafana.staging.internal.example.com"
+  grafana.ini:
+    database:
+      type: postgres
+      host: "REPLACE_STAGING_RDS_ENDPOINT"
+      name: grafana
+      user: grafana
+
+loki:
+  loki:
+    storage:
+      bucketNames:
+        chunks: "staging-mlops-loki-chunks"
+        ruler:  "staging-mlops-loki-ruler"
+        admin:  "staging-mlops-loki-admin"
+    limits_config:
+      retention_period: 336h  # 14 days
+
+prometheus:
+  server:
+    persistentVolume:
+      size: 100Gi
+
+tempo-distributed:
+  enabled: true
+  storage:
+    trace:
+      s3:
+        bucket: "staging-mlops-tempo"
+        region: us-east-1
+
+metrics-server:
+  enabled: true

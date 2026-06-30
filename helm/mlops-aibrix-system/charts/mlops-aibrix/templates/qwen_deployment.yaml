@@ -1,0 +1,165 @@
+{{- if .Values.qwen.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.qwen.modelName }}
+  namespace: aibrix-system
+  labels:
+    model.aibrix.ai/name: {{ .Values.qwen.modelName }}
+    model.aibrix.ai/port: "8000"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      model.aibrix.ai/name: {{ .Values.qwen.modelName }}
+  # Recreate: two model replicas cannot share a single GPU, so we must
+  # fully terminate the old pod before the replacement can schedule.
+  strategy:
+    type: Recreate
+    rollingUpdate: null
+  template:
+    metadata:
+      labels:
+        model.aibrix.ai/name: {{ .Values.qwen.modelName }}
+        {{- include "mlops.cloudPodLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.global.serviceAccountName }}
+
+      {{- with .Values.vllm.runtimeClassName }}
+      runtimeClassName: {{ . }}
+      {{- end }}
+
+      initContainers:
+        - name: model-init
+          image: {{ .Values.model_storage.initContainer.registry }}/{{ .Values.model_storage.initContainer.repository }}:{{ .Values.model_storage.initContainer.tag }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              {{ include "modelCache.qwen.downloadScript" . | nindent 14 }}
+          volumeMounts:
+            - mountPath: /zm-model-cache
+              name: zm-model-cache
+
+        {{- if .Values.model_storage.qwen.lora_adapter_path }}
+        - name: lora-init
+          image: {{ .Values.model_storage.initContainer.registry }}/{{ .Values.model_storage.initContainer.repository }}:{{ .Values.model_storage.initContainer.tag }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              {{ include "modelCache.qwen.lora.downloadScript" . | nindent 14 }}
+          volumeMounts:
+            - mountPath: /lora-adapter-cache
+              name: lora-adapter-cache
+        {{- end }}
+
+      containers:
+        - name: vllm-openai
+          image: {{ include "mlops.modelImage" (dict "model" .Values.qwen "Values" .Values) | trim }}
+          imagePullPolicy: IfNotPresent
+          command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+          args:
+            - --host
+            - "0.0.0.0"
+            - --port
+            - "8000"
+            - --uvicorn-log-level
+            - warning
+            - --model
+            - /zm-model-cache/{{ .Values.model_storage.qwen.model_path }}/
+            - --served-model-name
+            - {{ .Values.qwen.servedModelName }}
+            - --tensor-parallel-size
+            - {{ .Values.qwen.tensorParallelSize | quote }}
+            - --pipeline-parallel-size
+            - {{ .Values.qwen.pipelineParallelSize | quote }}
+            - --max-model-len
+            - {{ .Values.qwen.maxModelLen | default "131072" | quote }}
+            - --tool-call-parser
+            - hermes
+            - --enable-auto-tool-choice
+            - --enable_prefix_caching
+            - --trust-remote-code
+            - --seed
+            - "42"
+            {{- if .Values.model_storage.qwen.lora_adapter_path }}
+            - --enable-lora
+            - --lora-modules
+            - {{ .Values.qwen.servedModelName }}-lora=/lora-adapter-cache/
+            {{- end }}
+
+          ports:
+            - containerPort: 8000
+              protocol: TCP
+
+          {{- if .Values.qwen.env }}
+          env:
+            {{- toYaml .Values.qwen.env | nindent 12 }}
+          {{- end }}
+
+          {{- with .Values.qwen.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            {{- if .Values.qwen.startupProbe }}
+            {{- toYaml .Values.qwen.startupProbe | nindent 12 }}
+            {{- else }}
+            failureThreshold: 90
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            {{- end }}
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            failureThreshold: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            failureThreshold: 3
+            periodSeconds: 20
+            timeoutSeconds: 5
+
+          volumeMounts:
+            - mountPath: /dev/shm
+              name: dshm
+            - mountPath: /zm-model-cache
+              name: zm-model-cache
+            - mountPath: /lora-adapter-cache
+              name: lora-adapter-cache
+
+      {{- $tolerations := .Values.qwen.tolerations | default .Values.vllm.tolerations }}
+      {{- with $tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.qwen.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      terminationGracePeriodSeconds: 30
+
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ (.Values.qwen.dshm).sizeLimit | default "8Gi" }}
+        - name: lora-adapter-cache
+          emptyDir: {}
+        - name: zm-model-cache
+          emptyDir: {}
+{{- end }}

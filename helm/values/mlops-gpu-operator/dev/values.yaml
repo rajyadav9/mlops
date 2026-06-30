@@ -1,0 +1,16 @@
+gpu-operator:
+  driver:
+    enabled: false
+
+  devicePlugin:
+    sharing:
+      timeSlicing:
+        resources:
+          - name: nvidia.com/gpu
+            # Allow up to 2 pods per GPU in dev to reduce cost
+            replicas: 2
+
+  dcgmExporter:
+    enabled: true
+    serviceMonitor:
+      enabled: true

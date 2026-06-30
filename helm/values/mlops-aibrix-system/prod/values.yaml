@@ -1,0 +1,68 @@
+mlops-aibrix:
+  global:
+    serviceAccountName: "prod-mlops"
+    cloud: "aws"
+    # dns_prefix empty in prod — models accessed via internal load balancer only,
+    # no Istio VirtualService hosts exposed
+    dns_prefix: ""
+    base_domain: "internal.example.com"
+
+  aibrix:
+    enabled: true
+    global:
+      registry: "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com"
+
+  vllm:
+    image:
+      registry: "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com"
+      repository: "thirdparty/vllm/vllm-openai"
+      # Immutable SHA — never :latest in prod
+      tag: "REPLACE_WITH_PROMOTED_SHA"
+
+  model_storage:
+    model_storage_location: "prod-mlops-model-weights"
+    initContainer:
+      registry: "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com"
+      repository: "thirdparty/amazon/aws-cli"
+      tag: "2.31.26"
+    qwen:
+      model_path: "REPLACE_WITH_PROD_QWEN_UUID"
+      lora_adapter_path: "REPLACE_WITH_PROD_LORA_UUID"
+    llama:
+      model_path: "REPLACE_WITH_PROD_LLAMA_UUID"
+
+  qwen:
+    enabled: true
+    tensorParallelSize: "2"
+    pipelineParallelSize: "1"
+    maxModelLen: "131072"
+    resources:
+      requests:
+        cpu: "80"
+        memory: "512Gi"
+        nvidia.com/gpu: "2"
+      limits:
+        cpu: "80"
+        memory: "512Gi"
+        nvidia.com/gpu: "2"
+    env:
+      - name: HUGGING_FACE_HUB_TOKEN
+        valueFrom:
+          secretKeyRef:
+            name: huggingface-token
+            key: token
+
+  llama:
+    enabled: true
+    tensorParallelSize: "4"
+    pipelineParallelSize: "1"
+    maxModelLen: "8192"
+    resources:
+      requests:
+        cpu: "80"
+        memory: "512Gi"
+        nvidia.com/gpu: "4"
+      limits:
+        cpu: "80"
+        memory: "512Gi"
+        nvidia.com/gpu: "4"

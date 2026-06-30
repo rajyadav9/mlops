@@ -1,0 +1,82 @@
+# kube-prometheus-stack Helm values
+# Install: helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+#            -n monitoring -f k8s/monitoring/prometheus-values.yaml
+
+prometheus:
+  prometheusSpec:
+    # Retain 15 days of metrics locally; ship to long-term store (Thanos/Cortex) in prod
+    retention: 15d
+    retentionSize: 20GB
+
+    # Scrape interval — 15s balances resolution vs cardinality
+    scrapeInterval: 15s
+    evaluationInterval: 15s
+
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: 2
+        memory: 4Gi
+
+    # Allow Prometheus to scrape ServiceMonitors from all namespaces
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    serviceMonitorNamespaceSelector: {}
+
+    podMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelector: {}
+    podMonitorNamespaceSelector: {}
+
+    # Persist data across pod restarts
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp2
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 50Gi
+
+grafana:
+  enabled: true
+  adminPassword: changeme-in-production  # use Secrets Manager / SOPS in prod
+
+  persistence:
+    enabled: true
+    size: 5Gi
+
+  # Pre-load the vLLM dashboard via ConfigMap
+  sidecar:
+    dashboards:
+      enabled: true
+      searchNamespace: ALL
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+# ServiceMonitor for vLLM — tells Prometheus to scrape /metrics on port 8000
+additionalServiceMonitors:
+  - name: vllm
+    namespace: vllm
+    selector:
+      matchLabels:
+        app.kubernetes.io/name: vllm
+    endpoints:
+      - port: http
+        path: /metrics
+        interval: 15s
+        scrapeTimeout: 10s

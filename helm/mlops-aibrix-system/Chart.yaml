@@ -1,0 +1,19 @@
+apiVersion: v2
+name: mlops-aibrix-system
+description: >
+  AIBrix-based LLM serving platform — bundles the AIBrix control plane (controller,
+  gateway plugin, GPU optimizer, metadata service), Envoy Gateway, and vLLM model
+  deployments for Qwen and Llama with multi-cloud model weight download and Istio routing.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+# CRDs bundled in crds/ directory (applied before chart resources):
+#   - aibrix.ai: PodAutoscaler, ModelAdapter, KVCache, PodSet, RayClusterFleet, StormService
+#   - gateway.envoyproxy.io: EnvoyProxy, BackendTrafficPolicy, SecurityPolicy, etc.
+#   - gateway.networking.k8s.io: Gateway API core CRDs
+
+dependencies:
+  - name: mlops-aibrix
+    version: "0.1.0"
+    repository: "file://./charts/mlops-aibrix"

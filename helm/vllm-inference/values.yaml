@@ -1,0 +1,158 @@
+# Base values — environment overrides live in environments/{dev,staging,prod}/values.yaml
+# Apply with: helm upgrade --install vllm-inference ./helm/vllm-inference \
+#               -f helm/vllm-inference/environments/prod/values.yaml
+
+global:
+  # Cloud provider drives how model weights are pulled in the init container.
+  # Supported: aws | gcp | az
+  cloud: "aws"
+
+  # Kubernetes ServiceAccount name. Must match the IRSA annotation in the cluster.
+  serviceAccountName: "vllm"
+
+  # Namespace override (defaults to helm release namespace)
+  namespace: "vllm"
+
+# --- vLLM runtime defaults (inherited by all model configs) ---
+vllm:
+  image:
+    registry: "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com"
+    repository: "vllm-inference"
+    tag: "latest"
+
+  tolerations:
+    - key: "nvidia.com/gpu"
+      operator: "Equal"
+      value: "present"
+      effect: "NoSchedule"
+
+  nodeSelector:
+    node-type: gpu
+
+  # Override per-model with model.runtimeClassName (e.g. "nvidia" for GPU operator clusters)
+  runtimeClassName: ""
+
+# --- Model: Qwen 3 14B ---
+qwen:
+  enabled: true
+  modelName: "qwen-3-14b"
+  servedModelName: "qwen-3-14b"
+
+  tensorParallelSize: "1"   # 1 GPU per pod (g4dn.xlarge, T4)
+  pipelineParallelSize: "1"
+
+  maxModelLen: "32768"
+
+  # Override image if running a different vLLM version for Qwen specifically
+  image: {}  # falls back to vllm.image if empty
+
+  resources:
+    requests:
+      cpu: "8"
+      memory: "32Gi"
+      nvidia.com/gpu: "1"
+    limits:
+      cpu: "16"
+      memory: "48Gi"
+      nvidia.com/gpu: "1"
+
+  # dshm size for tensor-parallel shared memory (/dev/shm)
+  dshm:
+    sizeLimit: "8Gi"
+
+  startupProbe:
+    failureThreshold: 90
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    timeoutSeconds: 5
+
+  tolerations: []   # merged with vllm.tolerations
+  affinity: {}
+
+  env: []
+  # Example:
+  # - name: VLLM_ATTENTION_BACKEND
+  #   value: FLASH_ATTN
+
+  # LoRA adapters — enable for fine-tuned variants
+  lora:
+    enabled: false
+    servedAdapters: []
+    # - adapterName: "qwen-3-14b-finance-lora"
+    #   mountPath: "/lora-adapter-cache/finance"
+
+  autoscaling:
+    minReplicas: 1
+    maxReplicas: 4
+    kedaTrigger:
+      # Scale on waiting requests per pod
+      waitingRequestsThreshold: "5"
+      # Scale on KV-cache pressure
+      gpuCacheThreshold: "80"
+    scaleDownCooldown: 300
+
+# --- Model: Llama (placeholder — mirrors apollo pattern) ---
+llama:
+  enabled: false
+  modelName: "llama-3-8b"
+  servedModelName: "llama-3-8b"
+  tensorParallelSize: "1"
+  pipelineParallelSize: "1"
+  maxModelLen: "8192"
+  image: {}
+  resources:
+    requests:
+      cpu: "4"
+      memory: "20Gi"
+      nvidia.com/gpu: "1"
+    limits:
+      cpu: "8"
+      memory: "32Gi"
+      nvidia.com/gpu: "1"
+  dshm:
+    sizeLimit: "4Gi"
+  tolerations: []
+  affinity: {}
+  env: []
+  autoscaling:
+    minReplicas: 1
+    maxReplicas: 4
+    kedaTrigger:
+      waitingRequestsThreshold: "5"
+      gpuCacheThreshold: "80"
+    scaleDownCooldown: 300
+
+# --- Model weight storage ---
+# S3 paths use UUIDs (content-addressed) — stable across renames,
+# matching the pattern in the apollo repo.
+model_storage:
+  # S3 bucket or GCS bucket or Azure storage account container
+  model_storage_location: "mlops-model-weights"
+
+  # initContainer image that provides aws/gcloud/azcopy
+  initContainer:
+    registry: "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com"
+    repository: "model-downloader"
+    tag: "latest"
+
+  qwen:
+    # UUID path in the bucket — change this to point at a different checkpoint
+    model_path: "REPLACE_WITH_QWEN_S3_UUID"
+    lora_adapter_path: ""   # leave empty to skip lora init container
+
+  llama:
+    model_path: "REPLACE_WITH_LLAMA_S3_UUID"
+
+# --- Ingress ---
+ingress:
+  enabled: true
+  className: "nginx"   # prod: "alb"
+  host: "vllm.internal.example.com"
+  annotations: {}
+  tls: []
+
+# --- Prometheus ServiceMonitor ---
+serviceMonitor:
+  enabled: true
+  interval: "15s"
+  namespace: "monitoring"

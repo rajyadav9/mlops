@@ -1,0 +1,59 @@
+# Staging environment overrides
+# Staging mirrors prod configuration but uses a separate model bucket and cluster.
+# Changes must pass staging before a prod promotion PR is opened.
+#
+# helm upgrade --install vllm-inference ./helm/vllm-inference \
+#   -f helm/vllm-inference/environments/staging/values.yaml \
+#   -n vllm --create-namespace
+
+global:
+  cloud: "aws"
+  serviceAccountName: "staging-vllm"
+
+vllm:
+  image:
+    registry: "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com"
+    repository: "vllm-inference"
+    # Staging pins to the same SHA as prod candidate — no :latest in staging
+    tag: "REPLACE_WITH_CANDIDATE_SHA"
+
+model_storage:
+  model_storage_location: "staging-mlops-model-weights"
+  qwen:
+    model_path: "REPLACE_WITH_STAGING_QWEN_S3_UUID"
+    lora_adapter_path: "REPLACE_WITH_STAGING_LORA_UUID"
+
+qwen:
+  enabled: true
+  tensorParallelSize: "1"
+  maxModelLen: "32768"
+
+  resources:
+    requests:
+      cpu: "8"
+      memory: "32Gi"
+      nvidia.com/gpu: "1"
+    limits:
+      cpu: "16"
+      memory: "48Gi"
+      nvidia.com/gpu: "1"
+
+  autoscaling:
+    minReplicas: 1
+    maxReplicas: 3
+    scaleDownCooldown: 300
+
+  lora:
+    enabled: true
+    servedAdapters:
+      - adapterName: "qwen-3-14b-finance-lora"
+        mountPath: "/lora-adapter-cache"
+
+ingress:
+  host: "vllm.staging.internal.example.com"
+
+llama:
+  enabled: false
+
+serviceMonitor:
+  enabled: true

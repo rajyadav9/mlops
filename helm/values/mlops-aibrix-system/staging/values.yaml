@@ -1,0 +1,56 @@
+mlops-aibrix:
+  global:
+    serviceAccountName: "staging-mlops"
+    cloud: "aws"
+    dns_prefix: "staging.mlops"
+    base_domain: "internal.example.com"
+
+  aibrix:
+    enabled: true
+    global:
+      registry: "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com"
+
+  vllm:
+    image:
+      registry: "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com"
+      repository: "thirdparty/vllm/vllm-openai"
+      tag: "REPLACE_WITH_CANDIDATE_SHA"
+
+  model_storage:
+    model_storage_location: "staging-mlops-model-weights"
+    initContainer:
+      registry: "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com"
+      repository: "thirdparty/amazon/aws-cli"
+      tag: "2.31.26"
+    qwen:
+      model_path: "REPLACE_WITH_STAGING_QWEN_UUID"
+      lora_adapter_path: "REPLACE_WITH_STAGING_LORA_UUID"
+    llama:
+      model_path: "REPLACE_WITH_STAGING_LLAMA_UUID"
+
+  qwen:
+    enabled: true
+    tensorParallelSize: "2"
+    maxModelLen: "131072"
+    resources:
+      requests:
+        cpu: "16"
+        memory: "48Gi"
+        nvidia.com/gpu: "2"
+      limits:
+        cpu: "32"
+        memory: "64Gi"
+        nvidia.com/gpu: "2"
+
+  llama:
+    enabled: true
+    tensorParallelSize: "4"
+    resources:
+      requests:
+        cpu: "32"
+        memory: "200Gi"
+        nvidia.com/gpu: "4"
+      limits:
+        cpu: "64"
+        memory: "256Gi"
+        nvidia.com/gpu: "4"

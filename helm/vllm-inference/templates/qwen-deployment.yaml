@@ -1,0 +1,194 @@
+{{- if .Values.qwen.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.qwen.modelName }}
+  namespace: {{ .Values.global.namespace | default .Release.Namespace }}
+  labels:
+    model.aibrix.ai/name: {{ .Values.qwen.modelName }}
+    model.aibrix.ai/port: "8000"
+    app.kubernetes.io/name: {{ .Values.qwen.modelName }}
+    app.kubernetes.io/part-of: vllm-inference
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.qwen.autoscaling.minReplicas }}
+  selector:
+    matchLabels:
+      model.aibrix.ai/name: {{ .Values.qwen.modelName }}
+  # Recreate during model updates to avoid two versions sharing the GPU
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        model.aibrix.ai/name: {{ .Values.qwen.modelName }}
+        app.kubernetes.io/name: {{ .Values.qwen.modelName }}
+        {{- include "vllm.cloudPodLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.global.serviceAccountName }}
+
+      {{- with .Values.vllm.runtimeClassName }}
+      runtimeClassName: {{ . }}
+      {{- end }}
+
+      initContainers:
+        # Download model weights from cloud storage before the main container starts.
+        # Uses cloud-specific tooling (aws s3 sync / gcloud storage / azcopy) via _helpers.tpl.
+        - name: model-init
+          image: {{ .Values.model_storage.initContainer.registry }}/{{ .Values.model_storage.initContainer.repository }}:{{ .Values.model_storage.initContainer.tag }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              {{ include "modelCache.qwen.downloadScript" . | nindent 14 }}
+          volumeMounts:
+            - mountPath: /zm-model-cache
+              name: zm-model-cache
+          resources:
+            requests:
+              cpu: "1"
+              memory: "2Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+
+        {{- if and .Values.qwen.lora.enabled .Values.model_storage.qwen.lora_adapter_path }}
+        - name: lora-init
+          image: {{ .Values.model_storage.initContainer.registry }}/{{ .Values.model_storage.initContainer.repository }}:{{ .Values.model_storage.initContainer.tag }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              {{ include "modelCache.qwen.lora.downloadScript" . | nindent 14 }}
+          volumeMounts:
+            - mountPath: /lora-adapter-cache
+              name: lora-adapter-cache
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+        {{- end }}
+
+      containers:
+        - name: vllm-openai
+          image: {{ include "vllm.image" (dict "model" .Values.qwen "Values" .Values) | trim }}
+          imagePullPolicy: IfNotPresent
+          command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+          args:
+            - --host
+            - "0.0.0.0"
+            - --port
+            - "8000"
+            - --model
+            - /zm-model-cache/{{ .Values.model_storage.qwen.model_path }}/
+            - --served-model-name
+            - {{ .Values.qwen.servedModelName }}
+            - --tensor-parallel-size
+            - {{ .Values.qwen.tensorParallelSize | quote }}
+            - --pipeline-parallel-size
+            - {{ .Values.qwen.pipelineParallelSize | quote }}
+            - --max-model-len
+            - {{ .Values.qwen.maxModelLen | default "32768" | quote }}
+            - --uvicorn-log-level
+            - warning
+            - --enable-auto-tool-choice
+            - --tool-call-parser
+            - hermes
+            - --enable_prefix_caching
+            - --trust-remote-code
+            {{- if .Values.qwen.lora.enabled }}
+            - --enable-lora
+            {{- range .Values.qwen.lora.servedAdapters }}
+            - --lora-modules
+            - {{ .adapterName }}={{ .mountPath }}
+            {{- end }}
+            {{- end }}
+
+          ports:
+            - containerPort: 8000
+              protocol: TCP
+
+          {{- if .Values.qwen.env }}
+          env:
+            {{- toYaml .Values.qwen.env | nindent 12 }}
+          {{- end }}
+
+          {{- with .Values.qwen.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            {{- if .Values.qwen.startupProbe }}
+            {{- toYaml .Values.qwen.startupProbe | nindent 12 }}
+            {{- else }}
+            failureThreshold: 90
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            {{- end }}
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            failureThreshold: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            failureThreshold: 3
+            periodSeconds: 20
+            timeoutSeconds: 5
+
+          volumeMounts:
+            - mountPath: /dev/shm
+              name: dshm
+            - mountPath: /zm-model-cache
+              name: zm-model-cache
+            {{- if .Values.qwen.lora.enabled }}
+            - mountPath: /lora-adapter-cache
+              name: lora-adapter-cache
+            {{- end }}
+
+      {{- $tolerations := .Values.qwen.tolerations | default .Values.vllm.tolerations }}
+      {{- with $tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.qwen.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.vllm.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      terminationGracePeriodSeconds: 60
+
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ (.Values.qwen.dshm).sizeLimit | default "8Gi" }}
+        - name: lora-adapter-cache
+          emptyDir: {}
+        - name: zm-model-cache
+          emptyDir: {}
+          # Production: replace with a PVC backed by EFS so model weights
+          # survive pod restarts without re-downloading:
+          # persistentVolumeClaim:
+          #   claimName: qwen-model-weights
+{{- end }}

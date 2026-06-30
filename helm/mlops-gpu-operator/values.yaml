@@ -1,0 +1,68 @@
+# Base values for mlops-gpu-operator.
+# Environment overrides: helm/values/mlops-gpu-operator/{dev,staging,prod}/values.yaml
+#
+# Install order (GPU Operator CRDs must exist before vLLM pods schedule):
+#   1. helm dependency build helm/mlops-gpu-operator
+#   2. helm upgrade --install mlops-gpu-operator ./helm/mlops-gpu-operator \
+#        -f helm/values/mlops-gpu-operator/dev/values.yaml \
+#        -n gpu-operator --create-namespace
+#
+# Local (kind, CPU-only): skip this chart entirely. GPU resources won't be advertised
+# and vLLM runs with --device cpu. The assessment local setup uses this path.
+
+gpu-operator:
+  # NVIDIA driver — disabled because AL2_x86_64_GPU AMI ships drivers v535+.
+  # Enable only for custom AMIs or non-EKS clusters without pre-installed drivers.
+  driver:
+    enabled: false
+
+  # Container toolkit: hooks into containerd so containers can access /dev/nvidia*
+  toolkit:
+    enabled: true
+
+  # Device plugin: advertises nvidia.com/gpu resources to the scheduler
+  devicePlugin:
+    enabled: true
+    config:
+      # Default resource name used in pod resource requests
+      name: "nvidia-device-plugin-config"
+    # Time-slicing: allow multiple pods to share one GPU (useful for dev/test).
+    # Set sharing.timeSlicing.replicas to 0 in prod to avoid noisy-neighbour effects.
+    sharing:
+      timeSlicing:
+        renameByDefault: false
+        resources:
+          - name: nvidia.com/gpu
+            replicas: 1   # 1 = no sharing (prod default)
+
+  # DCGM Exporter: GPU hardware metrics for Prometheus
+  # Key metrics: GPU utilisation, VRAM used/free, power draw, temperature
+  dcgmExporter:
+    enabled: true
+    # Metrics config — subset relevant for LLM inference
+    config:
+      name: "dcgm-metrics-config"
+    # Only run on GPU-tainted nodes
+    tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Equal"
+        value: "present"
+        effect: "NoSchedule"
+    serviceMonitor:
+      enabled: true   # auto-creates a ServiceMonitor for Prometheus
+
+  # MIG Manager — disabled (not using MIG partitioning for this workload)
+  migManager:
+    enabled: false
+
+  # Node Status Exporter: emits a GPU-ready condition on the Node object
+  nodeStatusExporter:
+    enabled: true
+
+  # Operator itself
+  operator:
+    tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Equal"
+        value: "present"
+        effect: "NoSchedule"

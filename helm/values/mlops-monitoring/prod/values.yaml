@@ -1,0 +1,55 @@
+global:
+  environment: prod
+  cloud: aws
+  cluster_name: mlops-eks-prod
+  base_domain: internal.example.com
+
+grafanaAlerting:
+  enabled: true
+  paging: true    # PagerDuty on for prod
+
+grafana:
+  replicas: 2
+  ingress:
+    hosts:
+      - "grafana.internal.example.com"
+  grafana.ini:
+    database:
+      type: postgres
+      host: "REPLACE_PROD_RDS_ENDPOINT"
+      name: grafana
+      user: grafana
+  resources:
+    requests:
+      cpu: "2"
+      memory: "4Gi"
+    limits:
+      cpu: "4"
+      memory: "8Gi"
+
+loki:
+  loki:
+    storage:
+      bucketNames:
+        chunks: "prod-mlops-loki-chunks"
+        ruler:  "prod-mlops-loki-ruler"
+        admin:  "prod-mlops-loki-admin"
+    limits_config:
+      # 7-year retention for regulatory compliance (MAS TRM, GDPR)
+      retention_period: "61320h"
+
+prometheus:
+  server:
+    persistentVolume:
+      size: 500Gi
+
+tempo-distributed:
+  enabled: true
+  storage:
+    trace:
+      s3:
+        bucket: "prod-mlops-tempo"
+        region: us-east-1
+
+metrics-server:
+  enabled: true

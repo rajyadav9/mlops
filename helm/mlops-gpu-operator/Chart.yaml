@@ -1,0 +1,17 @@
+apiVersion: v2
+name: mlops-gpu-operator
+description: NVIDIA GPU Operator — manages drivers, device plugin, DCGM exporter on GPU nodes
+type: application
+version: 0.1.0
+appVersion: "24.9.2"
+
+# The GPU Operator bundles and manages:
+#   - NVIDIA Container Toolkit (runtime hook for GPU access)
+#   - Device Plugin          (exposes nvidia.com/gpu to the K8s scheduler)
+#   - DCGM Exporter          (GPU hardware metrics → Prometheus)
+#   - Node Status Exporter   (GPU node readiness signalling)
+#   - Driver (disabled on EKS AL2_x86_64_GPU — drivers pre-installed by AMI)
+dependencies:
+  - name: gpu-operator
+    repository: https://helm.ngc.nvidia.com/nvidia
+    version: "24.9.2"

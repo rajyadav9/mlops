@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Terraform validation ───────────────────────────────────────────────────
+  terraform-validate:
+    name: Terraform Lint & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.5"
+
+      - name: terraform fmt check
+        run: terraform fmt -check -recursive terraform/
+
+      - name: terraform validate (prod)
+        working-directory: terraform/environments/prod
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+  # ── Kubernetes manifest validation ────────────────────────────────────────
+  k8s-validate:
+    name: Kubernetes Manifest Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kubeval
+        run: |
+          curl -sL https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz | tar xz
+          sudo mv kubeval /usr/local/bin/
+
+      - name: Validate manifests
+        run: |
+          kubeval --ignore-missing-schemas \
+            k8s/namespace.yaml \
+            k8s/vllm/*.yaml \
+            k8s/keda/scaledobject.yaml \
+            k8s/monitoring/grafana-dashboard-configmap.yaml
+
+  # ── Docker build (CPU image for CI) ───────────────────────────────────────
+  docker-build:
+    name: Docker Build & Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build CPU image
+        uses: docker/build-push-action@v5
+        with:
+          context: docker/
+          file: docker/Dockerfile.cpu
+          push: false
+          load: true
+          tags: vllm-inference:ci-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start container and run smoke test
+        run: |
+          docker run -d \
+            --name vllm-ci \
+            -p 8000:8000 \
+            -e HF_HUB_DISABLE_TELEMETRY=1 \
+            vllm-inference:ci-test
+
+          echo "Waiting for model to load (up to 5 min)..."
+          timeout 300 bash -c 'until curl -sf http://localhost:8000/health; do sleep 10; done'
+
+          bash scripts/test-api.sh http://localhost:8000
+
+          docker stop vllm-ci
+
+      - name: Container cleanup
+        if: always()
+        run: docker rm -f vllm-ci 2>/dev/null || true

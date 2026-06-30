@@ -1,0 +1,53 @@
+mlops-aibrix:
+  global:
+    serviceAccountName: "dev-mlops"
+    cloud: "aws"
+    dns_prefix: "dev.mlops"
+    base_domain: "internal.example.com"
+
+  aibrix:
+    enabled: true
+    global:
+      registry: "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com"
+    controllerManager:
+      image:
+        repository: "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/thirdparty/aibrix/controller-manager"
+        tag: "0.4.1"
+    gatewayPlugin:
+      container:
+        image:
+          repository: "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/thirdparty/aibrix/gateway-plugins"
+          tag: "0.4.1"
+
+  vllm:
+    image:
+      registry: "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com"
+      repository: "thirdparty/vllm/vllm-openai"
+      tag: "0.9.1"
+
+  model_storage:
+    model_storage_location: "dev-mlops-model-weights"
+    initContainer:
+      registry: "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com"
+      repository: "thirdparty/amazon/aws-cli"
+      tag: "2.31.26"
+    qwen:
+      model_path: "REPLACE_WITH_DEV_QWEN_UUID"
+      lora_adapter_path: ""
+
+  qwen:
+    enabled: true
+    tensorParallelSize: "1"
+    maxModelLen: "32768"
+    resources:
+      requests:
+        cpu: "8"
+        memory: "32Gi"
+        nvidia.com/gpu: "1"
+      limits:
+        cpu: "16"
+        memory: "48Gi"
+        nvidia.com/gpu: "1"
+
+  llama:
+    enabled: false

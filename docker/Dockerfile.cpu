@@ -1,0 +1,51 @@
+# CPU-only image for local development, CI smoke tests, and assessment demo.
+# Significantly lighter than the GPU image (~2GB vs ~8GB).
+# Trade-offs vs GPU production image:
+#   - Inference throughput ~20-50x slower (no CUDA kernel path)
+#   - dtype must be float32 (no FP16 on CPU)
+#   - KV cache uses RAM instead of VRAM
+#   - Not suitable for production latency SLOs
+
+FROM python:3.11-slim
+
+LABEL org.opencontainers.image.title="vllm-inference-cpu"
+LABEL org.opencontainers.image.description="vLLM CPU-mode for local testing"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install PyTorch CPU wheel first to avoid pulling the 2GB CUDA wheel
+RUN pip install --no-cache-dir \
+    torch==2.2.1 --index-url https://download.pytorch.org/whl/cpu
+
+RUN pip install --no-cache-dir \
+    vllm==0.4.3 \
+    prometheus-client>=0.20.0
+
+RUN useradd -r -u 1000 -g root -d /home/vllm -m vllm
+
+USER 1000
+
+RUN mkdir -p /home/vllm/.cache/huggingface
+
+ENV HF_HOME=/home/vllm/.cache/huggingface \
+    TRANSFORMERS_CACHE=/home/vllm/.cache/huggingface \
+    HF_HUB_DISABLE_TELEMETRY=1 \
+    VLLM_WORKER_MULTIPROC_METHOD=spawn
+
+HEALTHCHECK --interval=30s --timeout=15s --start-period=180s --retries=6 \
+    CMD curl -sf http://localhost:8000/health || exit 1
+
+EXPOSE 8000
+
+ENTRYPOINT ["python", "-m", "vllm.entrypoints.openai.api_server"]
+CMD [ \
+    "--model", "facebook/opt-125m", \
+    "--port", "8000", \
+    "--host", "0.0.0.0", \
+    "--device", "cpu", \
+    "--dtype", "float32", \
+    "--max-model-len", "2048", \
+    "--disable-log-requests" \
+]

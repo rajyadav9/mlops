@@ -1,0 +1,22 @@
+{{- if .Values.llama.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.llama.modelName }}-service
+  namespace: aibrix-system
+  labels:
+    model.aibrix.ai/name: {{ .Values.llama.modelName }}
+    prometheus-discovery: "true"
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+spec:
+  type: ClusterIP
+  selector:
+    model.aibrix.ai/name: {{ .Values.llama.modelName }}
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+{{- end }}

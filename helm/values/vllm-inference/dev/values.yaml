@@ -1,0 +1,53 @@
+# Dev environment overrides
+# helm upgrade --install vllm-inference ./helm/vllm-inference \
+#   -f helm/vllm-inference/environments/dev/values.yaml \
+#   -n vllm --create-namespace
+
+global:
+  cloud: "aws"
+  serviceAccountName: "dev-vllm"
+
+vllm:
+  image:
+    registry: "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com"
+    repository: "vllm-inference"
+    tag: "latest"   # dev tracks :latest, not a pinned SHA
+
+model_storage:
+  model_storage_location: "dev-mlops-model-weights"
+  qwen:
+    # Dev uses a smaller quantised checkpoint to save GPU cost
+    model_path: "REPLACE_WITH_DEV_QWEN_S3_UUID"
+    lora_adapter_path: ""
+
+qwen:
+  enabled: true
+  tensorParallelSize: "1"
+  maxModelLen: "8192"      # shorter context in dev to save VRAM
+
+  resources:
+    requests:
+      cpu: "4"
+      memory: "16Gi"
+      nvidia.com/gpu: "1"
+    limits:
+      cpu: "8"
+      memory: "24Gi"
+      nvidia.com/gpu: "1"
+
+  autoscaling:
+    minReplicas: 1
+    maxReplicas: 2           # cap scale-out in dev
+    scaleDownCooldown: 120   # scale down faster in dev (cheaper)
+
+  lora:
+    enabled: false
+
+ingress:
+  host: "vllm.dev.internal.example.com"
+
+llama:
+  enabled: false   # llama not deployed in dev
+
+serviceMonitor:
+  enabled: true

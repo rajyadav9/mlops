@@ -1,0 +1,210 @@
+# Base values for mlops-monitoring.
+# Environment overrides live at helm/values/mlops-monitoring/{dev,staging,prod}/values.yaml
+#
+# helm upgrade --install mlops-monitoring ./helm/mlops-monitoring \
+#   -f helm/values/mlops-monitoring/dev/values.yaml \
+#   -n monitoring --create-namespace
+
+global:
+  environment: dev
+  cloud: "aws"
+  cluster_name: "mlops-eks"
+  base_domain: "internal.example.com"
+  secrets:
+    provider: "aws"
+
+# --- Alloy (log/metric/trace collection agent) ---
+alloy:
+  enabled: true
+  alloy:
+    extraPorts:
+      - name: grpc-otel
+        port: 4317
+        targetPort: 4317
+      - name: http-otel
+        port: 4318
+        targetPort: 4318
+    configMap:
+      create: false
+      name: "alloy-config"
+      key: "config.alloy"
+    mounts:
+      varlog: true
+  controller:
+    # Alloy must run on GPU nodes too to collect logs from vLLM pods
+    tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Equal"
+        value: "present"
+        effect: "NoSchedule"
+
+# --- Prometheus ---
+prometheus:
+  enabled: true
+  server:
+    persistentVolume:
+      size: 100Gi
+    extraFlags:
+      - "web.enable-remote-write-receiver"
+      - "web.enable-lifecycle"
+    tsdb:
+      out_of_order_time_window: "360s"
+  serverFiles:
+    prometheus.yml:
+      scrape_configs:
+        - job_name: "prometheus"
+          static_configs:
+            - targets: ["localhost:9090"]
+        - job_name: "kube-state-metrics"
+          static_configs:
+            - targets: ["kube-state-metrics.monitoring.svc.cluster.local:8080"]
+        # vLLM metrics — scrape all pods with the prometheus.io/scrape annotation
+        - job_name: "vllm"
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces:
+                names: ["vllm"]
+          relabel_configs:
+            - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+              action: keep
+              regex: "true"
+            - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+              action: replace
+              target_label: __metrics_path__
+              regex: (.+)
+            - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+              action: replace
+              target_label: __address__
+              regex: ([^:]+)(?::\d+)?;(\d+)
+              replacement: $1:$2
+  alertmanager:
+    enabled: true
+  kube-state-metrics:
+    enabled: true
+  prometheus-node-exporter:
+    enabled: true
+  prometheus-pushgateway:
+    enabled: false
+
+# --- Grafana ---
+grafana:
+  enabled: true
+  replicas: 1
+  persistence:
+    type: pvc
+    enabled: true
+    size: 10Gi
+  grafana.ini:
+    security:
+      allow_embedding: true
+    database:
+      type: sqlite3  # override per-env with postgres in prod
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          url: "http://mlops-monitoring-prometheus-server.monitoring.svc.cluster.local:80"
+          isDefault: true
+          editable: false
+        - name: Loki
+          type: loki
+          url: "http://mlops-monitoring-loki-gateway.monitoring.svc.cluster.local:80"
+          isDefault: false
+          editable: false
+        - name: Tempo
+          type: tempo
+          url: "http://mlops-monitoring-tempo-distributed-query-frontend.monitoring.svc.cluster.local:3100"
+          isDefault: false
+          editable: false
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      folderAnnotation: grafana_folder
+      resource: both
+      provider:
+        foldersFromFilesStructure: true
+    alerts:
+      enabled: true
+      label: grafana_alert
+      labelValue: "1"
+  ingress:
+    enabled: true
+    hosts:
+      - "grafana.dev.internal.example.com"
+
+# --- Loki (log aggregation, distributed mode for prod) ---
+loki:
+  enabled: true
+  loki:
+    auth_enabled: false
+    schemaConfig:
+      configs:
+        - from: "2025-01-01"
+          store: tsdb
+          object_store: s3
+          schema: v13
+          index:
+            prefix: loki_index_
+            period: 24h
+    storage:
+      type: s3
+      bucketNames:
+        chunks: "REPLACE_LOKI_CHUNKS_BUCKET"
+        ruler: "REPLACE_LOKI_RULER_BUCKET"
+        admin: "REPLACE_LOKI_ADMIN_BUCKET"
+      s3:
+        region: us-east-1
+    limits_config:
+      retention_period: 336h  # 14 days default; prod overrides to 7 years for compliance
+      allow_structured_metadata: true
+      volume_enabled: true
+  deploymentMode: Distributed
+  test:
+    enabled: false
+  lokiCanary:
+    enabled: false
+  minio:
+    enabled: false
+  serviceAccount:
+    create: false
+    name: "vllm"   # reuse IRSA SA with Loki S3 permissions added
+
+# --- Tempo (distributed tracing) ---
+tempo-distributed:
+  enabled: true
+  storage:
+    trace:
+      backend: s3
+      s3:
+        bucket: "REPLACE_TEMPO_BUCKET"
+        region: "us-east-1"
+        insecure: false
+  traces:
+    otlp:
+      http:
+        enabled: true
+      grpc:
+        enabled: true
+  minio:
+    enabled: false
+
+# --- Metrics Server (required for kubectl top and HPA) ---
+metrics-server:
+  enabled: true
+  args:
+    - --kubelet-insecure-tls
+
+# --- Grafana alerting config (PagerDuty + Slack) ---
+grafanaAlerting:
+  enabled: false
+  paging: false
+  slackToken: "$SLACK_TOKEN"
+  pagerdutyKey: "$PD_INTEGRATION_KEY"
+  alertEnv: ""
+  singleChannel: ""
+  teams:
+    - name: mlops

@@ -1,0 +1,148 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vllm-dashboard
+  namespace: monitoring
+  labels:
+    # Grafana sidecar picks up ConfigMaps with this label
+    grafana_dashboard: "1"
+data:
+  vllm-dashboard.json: |
+    {
+      "title": "vLLM Inference Service",
+      "uid": "vllm-inference-v1",
+      "schemaVersion": 38,
+      "version": 1,
+      "refresh": "15s",
+      "time": { "from": "now-1h", "to": "now" },
+      "templating": {
+        "list": [
+          {
+            "name": "namespace",
+            "type": "query",
+            "query": "label_values(vllm:num_requests_running, namespace)",
+            "current": { "value": "vllm" }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Request Throughput (req/s)",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 0, "w": 8, "h": 8 },
+          "targets": [
+            {
+              "expr": "sum(rate(vllm:e2e_request_latency_seconds_count{namespace=\"$namespace\"}[1m]))",
+              "legendFormat": "req/s"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "reqps", "color": { "mode": "palette-classic" } }
+          }
+        },
+        {
+          "id": 2,
+          "title": "End-to-End Request Latency (p50 / p95 / p99)",
+          "type": "timeseries",
+          "gridPos": { "x": 8, "y": 0, "w": 8, "h": 8 },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.50, sum(rate(vllm:e2e_request_latency_seconds_bucket{namespace=\"$namespace\"}[1m])) by (le))",
+              "legendFormat": "p50"
+            },
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(vllm:e2e_request_latency_seconds_bucket{namespace=\"$namespace\"}[1m])) by (le))",
+              "legendFormat": "p95"
+            },
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(vllm:e2e_request_latency_seconds_bucket{namespace=\"$namespace\"}[1m])) by (le))",
+              "legendFormat": "p99"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "s" }
+          }
+        },
+        {
+          "id": 3,
+          "title": "GPU KV-Cache Utilization (%)",
+          "type": "gauge",
+          "gridPos": { "x": 16, "y": 0, "w": 8, "h": 8 },
+          "targets": [
+            {
+              "expr": "max(vllm:gpu_cache_usage_perc{namespace=\"$namespace\"}) * 100",
+              "legendFormat": "GPU Cache %"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 70 },
+                  { "color": "red", "value": 90 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 4,
+          "title": "Request Queue Depth (waiting)",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 8, "w": 8, "h": 8 },
+          "targets": [
+            {
+              "expr": "sum(vllm:num_requests_waiting{namespace=\"$namespace\"})",
+              "legendFormat": "Waiting"
+            },
+            {
+              "expr": "sum(vllm:num_requests_running{namespace=\"$namespace\"})",
+              "legendFormat": "Running"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "short" }
+          }
+        },
+        {
+          "id": 5,
+          "title": "Token Generation Rate",
+          "type": "timeseries",
+          "gridPos": { "x": 8, "y": 8, "w": 8, "h": 8 },
+          "targets": [
+            {
+              "expr": "sum(rate(vllm:generation_tokens_total{namespace=\"$namespace\"}[1m]))",
+              "legendFormat": "Generation tokens/s"
+            },
+            {
+              "expr": "sum(rate(vllm:prompt_tokens_total{namespace=\"$namespace\"}[1m]))",
+              "legendFormat": "Prompt tokens/s"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "short" }
+          }
+        },
+        {
+          "id": 6,
+          "title": "vLLM Pod Count",
+          "type": "stat",
+          "gridPos": { "x": 16, "y": 8, "w": 8, "h": 8 },
+          "targets": [
+            {
+              "expr": "kube_deployment_status_replicas_ready{deployment=\"vllm\",namespace=\"$namespace\"}",
+              "legendFormat": "Ready Pods"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "short" }
+          }
+        }
+      ]
+    }

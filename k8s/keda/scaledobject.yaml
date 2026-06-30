@@ -1,0 +1,80 @@
+# KEDA scales vLLM pods based on the request queue depth reported by Prometheus.
+# This is preferable to CPU/memory HPA because GPU utilization doesn't track
+# request backpressure — a model can sit at 20% GPU while requests queue up.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: vllm
+  namespace: vllm
+  labels:
+    app.kubernetes.io/name: vllm
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: vllm
+
+  # Never scale to zero — cold starts take minutes (model load)
+  minReplicaCount: 1
+  maxReplicaCount: 8
+
+  # How long to wait before scaling down after load drops
+  cooldownPeriod: 300  # 5 min — avoid thrashing during bursty traffic
+
+  pollingInterval: 15  # check metrics every 15s
+
+  triggers:
+    # Scale out when average waiting requests per pod > 5
+    - type: prometheus
+      metadata:
+        serverAddress: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+        metricName: vllm_num_requests_waiting
+        # Scale: add a pod for every 5 queued requests
+        threshold: "5"
+        query: >-
+          sum(vllm:num_requests_waiting{namespace="vllm"})
+          /
+          max(kube_deployment_spec_replicas{deployment="vllm",namespace="vllm"})
+
+    # Secondary trigger: scale on GPU KV-cache pressure
+    # (cache > 80% → near OOM, latency degrades sharply)
+    - type: prometheus
+      metadata:
+        serverAddress: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+        metricName: vllm_gpu_cache_usage
+        threshold: "80"
+        query: >-
+          max(vllm:gpu_cache_usage_perc{namespace="vllm"}) * 100
+---
+# Fallback HPA — activates only if KEDA is unavailable.
+# KEDA manages its own HPA internally; this is a safety net.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: vllm-fallback
+  namespace: vllm
+  labels:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: autoscaler
+  annotations:
+    # This HPA is intentionally passive; KEDA creates and owns the active one.
+    # Exists so kubectl get hpa shows something even when KEDA is down.
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: vllm
+  minReplicas: 1
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+    scaleUp:
+      stabilizationWindowSeconds: 60

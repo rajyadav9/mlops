@@ -1,0 +1,19 @@
+global:
+  cluster_name: mlops-eks-dev
+  cloud: aws
+
+awsLoadBalancerController:
+  clusterName: mlops-eks-dev
+  serviceAccount:
+    annotations:
+      eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/mlops-eks-dev-alb-controller"
+
+externalSecrets:
+  serviceAccount:
+    annotations:
+      eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/mlops-eks-dev-external-secrets"
+
+istiod:
+  meshConfig:
+    outboundTrafficPolicy:
+      mode: ALLOW_ANY  # more permissive in dev for iteration speed

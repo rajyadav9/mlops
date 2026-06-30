@@ -1,0 +1,42 @@
+global:
+  environment: dev
+  cloud: aws
+  cluster_name: mlops-eks-dev
+  base_domain: dev.internal.example.com
+
+grafanaAlerting:
+  enabled: true
+  paging: false
+  singleChannel: "#mlops-monitoring-dev"
+
+grafana:
+  replicas: 1
+  persistence:
+    size: 5Gi
+  ingress:
+    hosts:
+      - "grafana.dev.internal.example.com"
+  grafana.ini:
+    database:
+      type: sqlite3   # no RDS in dev
+
+loki:
+  loki:
+    storage:
+      bucketNames:
+        chunks: "dev-mlops-loki-chunks"
+        ruler:  "dev-mlops-loki-ruler"
+        admin:  "dev-mlops-loki-admin"
+    limits_config:
+      retention_period: 168h  # 7 days in dev
+
+prometheus:
+  server:
+    persistentVolume:
+      size: 50Gi
+
+tempo-distributed:
+  enabled: false   # skip tracing in dev to save cost
+
+metrics-server:
+  enabled: true

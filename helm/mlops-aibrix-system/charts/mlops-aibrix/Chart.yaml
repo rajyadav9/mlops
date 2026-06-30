@@ -1,0 +1,12 @@
+apiVersion: v2
+name: mlops-aibrix
+description: Inner chart — AIBrix control plane + vLLM model deployments
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+dependencies:
+  - name: aibrix
+    version: "0.4.1"
+    repository: https://danchev.github.io/helm-charts
+    condition: aibrix.enabled

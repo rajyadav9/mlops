@@ -1,0 +1,27 @@
+name               = "mlops"
+environment        = "prod"
+region             = "us-east-1"
+vpc_cidr           = "10.0.0.0/16"
+kubernetes_version = "1.29"
+
+# Set to true only during initial bootstrap; lock down after
+enable_public_endpoint = false
+
+# g6e.12xlarge: 48 vCPU, 192 GB RAM, 4× NVIDIA L40S (48 GB VRAM each = 192 GB total)
+# Fits Qwen2.5-14B (tensor_parallel=2) or Qwen2.5-72B (tensor_parallel=4, FP8 quant).
+# Step down to g6e.xlarge (1× L40S 48 GB) if running a single 14B model per node.
+gpu_instance_type = "g6e.12xlarge"
+gpu_capacity_type = "ON_DEMAND"
+gpu_desired_size  = 1
+gpu_max_size      = 4
+
+# General node group — platform services (monitoring, KEDA, AIBrix control plane, etc.)
+# m7i.4xlarge: 16 vCPU, 64 GB RAM — handles full monitoring stack with headroom
+enable_general_node_group  = true
+general_node_instance_type = "m7i.4xlarge"
+general_node_min_size      = 2
+general_node_desired_size  = 3
+general_node_max_size      = 8
+
+# GitHub Actions OIDC role — created separately (see docs/iam-github-oidc.md)
+ci_role_arn = "arn:aws:iam::123456789012:role/github-actions-mlops"

@@ -1,0 +1,23 @@
+{{- if .Values.qwen.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  # Service name must match model.aibrix.ai/name label — AIBrix uses this for routing
+  name: {{ .Values.qwen.modelName }}-service
+  namespace: aibrix-system
+  labels:
+    model.aibrix.ai/name: {{ .Values.qwen.modelName }}
+    prometheus-discovery: "true"
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+spec:
+  type: ClusterIP
+  selector:
+    model.aibrix.ai/name: {{ .Values.qwen.modelName }}
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+{{- end }}

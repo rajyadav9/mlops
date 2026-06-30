@@ -1,0 +1,42 @@
+{{- if .Values.global.dns_prefix -}}
+{{- if .Values.qwen.enabled }}
+# Istio VirtualService: routes external traffic from the main-gateway to the Qwen service.
+# Host pattern: qwen-14b.{dns_prefix}.{base_domain}
+# In prod, dns_prefix is empty and models are accessed via internal load balancer only.
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: qwen-14b-vs
+  namespace: aibrix-system
+spec:
+  gateways:
+    - istio-system/main-gateway
+  hosts:
+    - qwen-14b.{{ .Values.global.dns_prefix }}.{{ .Values.global.base_domain }}
+  http:
+    - route:
+        - destination:
+            host: {{ .Values.qwen.modelName }}-service.aibrix-system.svc.cluster.local
+            port:
+              number: 8000
+{{- end }}
+---
+{{- if .Values.llama.enabled }}
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: llama-70b-vs
+  namespace: aibrix-system
+spec:
+  gateways:
+    - istio-system/main-gateway
+  hosts:
+    - llama-70b.{{ .Values.global.dns_prefix }}.{{ .Values.global.base_domain }}
+  http:
+    - route:
+        - destination:
+            host: {{ .Values.llama.modelName }}-service.aibrix-system.svc.cluster.local
+            port:
+              number: 8000
+{{- end }}
+{{- end }}

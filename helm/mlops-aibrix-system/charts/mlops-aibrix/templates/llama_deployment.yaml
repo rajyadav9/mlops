@@ -1,0 +1,138 @@
+{{- if .Values.llama.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.llama.modelName }}
+  namespace: aibrix-system
+  labels:
+    model.aibrix.ai/name: {{ .Values.llama.modelName }}
+    model.aibrix.ai/port: "8000"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      model.aibrix.ai/name: {{ .Values.llama.modelName }}
+  strategy:
+    type: Recreate
+    rollingUpdate: null
+  template:
+    metadata:
+      labels:
+        model.aibrix.ai/name: {{ .Values.llama.modelName }}
+        {{- include "mlops.cloudPodLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.global.serviceAccountName }}
+
+      {{- with .Values.vllm.runtimeClassName }}
+      runtimeClassName: {{ . }}
+      {{- end }}
+
+      initContainers:
+        - name: model-init
+          image: {{ .Values.model_storage.initContainer.registry }}/{{ .Values.model_storage.initContainer.repository }}:{{ .Values.model_storage.initContainer.tag }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              {{ include "modelCache.llama.downloadScript" . | nindent 14 }}
+          volumeMounts:
+            - mountPath: /zm-model-cache
+              name: zm-model-cache
+
+      containers:
+        - name: vllm-openai
+          image: {{ include "mlops.modelImage" (dict "model" .Values.llama "Values" .Values) | trim }}
+          imagePullPolicy: IfNotPresent
+          command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+          args:
+            - --host
+            - "0.0.0.0"
+            - --port
+            - "8000"
+            - --uvicorn-log-level
+            - warning
+            - --model
+            - /zm-model-cache/{{ .Values.model_storage.llama.model_path }}/
+            - --served-model-name
+            - {{ .Values.llama.servedModelName }}
+            - --tensor-parallel-size
+            - {{ .Values.llama.tensorParallelSize | quote }}
+            - --pipeline-parallel-size
+            - {{ .Values.llama.pipelineParallelSize | quote }}
+            - --max-model-len
+            - {{ .Values.llama.maxModelLen | default "8192" | quote }}
+            - --enable_prefix_caching
+            - --trust-remote-code
+            - --seed
+            - "42"
+
+          ports:
+            - containerPort: 8000
+              protocol: TCP
+
+          {{- if .Values.llama.env }}
+          env:
+            {{- toYaml .Values.llama.env | nindent 12 }}
+          {{- end }}
+
+          {{- with .Values.llama.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            {{- if .Values.llama.startupProbe }}
+            {{- toYaml .Values.llama.startupProbe | nindent 12 }}
+            {{- else }}
+            failureThreshold: 90
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            {{- end }}
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            failureThreshold: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            failureThreshold: 3
+            periodSeconds: 20
+            timeoutSeconds: 5
+
+          volumeMounts:
+            - mountPath: /dev/shm
+              name: dshm
+            - mountPath: /zm-model-cache
+              name: zm-model-cache
+
+      {{- $tolerations := .Values.llama.tolerations | default .Values.vllm.tolerations }}
+      {{- with $tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.llama.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      terminationGracePeriodSeconds: 30
+
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ (.Values.llama.dshm).sizeLimit | default "16Gi" }}
+        - name: zm-model-cache
+          emptyDir: {}
+{{- end }}

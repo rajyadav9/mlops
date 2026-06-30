@@ -1,0 +1,70 @@
+# Base networking values.
+# Environment overrides: helm/values/mlops-network/{dev,staging,prod}/values.yaml
+#
+# Install order:
+#   1. istio-base CRDs  (helm install istio-base istio/base -n istio-system --create-namespace)
+#   2. mlops-network    (this chart)
+#
+# helm upgrade --install mlops-network ./helm/mlops-network \
+#   -f helm/values/mlops-network/dev/values.yaml \
+#   -n istio-system --create-namespace
+
+global:
+  cluster_name: "mlops-eks"
+  cloud: "aws"
+
+# --- Istio control plane ---
+istiod:
+  enabled: true
+  meshConfig:
+    # mTLS everywhere — STRICT mode enforced per-namespace via PeerAuthentication
+    defaultConfig:
+      holdApplicationUntilProxyStarts: true
+    outboundTrafficPolicy:
+      mode: REGISTRY_ONLY  # block unexpected egress by default (compliance)
+  pilot:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: 1
+        memory: 4Gi
+
+# --- Istio ingress gateway ---
+istioIngressGateway:
+  enabled: true
+  service:
+    type: LoadBalancer
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: "external"
+      service.beta.kubernetes.io/aws-load-balancer-scheme: "internal"
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# --- AWS Load Balancer Controller (ALB + NLB from Ingress/Service objects) ---
+awsLoadBalancerController:
+  enabled: true
+  clusterName: "mlops-eks"
+  serviceAccount:
+    create: true
+    name: aws-load-balancer-controller
+    annotations:
+      # IRSA: role created by Terraform with elasticloadbalancing:* permissions
+      eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/mlops-eks-alb-controller"
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# --- External Secrets Operator (sync AWS Secrets Manager → K8s Secrets) ---
+externalSecrets:
+  enabled: true
+  serviceAccount:
+    create: true
+    annotations:
+      eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/mlops-eks-external-secrets"

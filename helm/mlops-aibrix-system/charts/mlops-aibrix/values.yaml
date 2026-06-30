@@ -1,0 +1,154 @@
+# Base values for mlops-aibrix (inner chart).
+# Environment overrides: helm/values/mlops-aibrix-system/{dev,staging,prod}/values.yaml
+# These values are accessed as .Values.mlops-aibrix.* from the outer chart.
+
+global:
+  serviceAccountName: "mlops"
+  cloud: "aws"               # aws | gcp | az — controls model download command in _helpers.tpl
+  dns_prefix: "dev.mlops"    # used in Istio VirtualService hosts
+  base_domain: "internal.example.com"
+
+# --- AIBrix control plane ---
+aibrix:
+  enabled: true
+  global:
+    registry: "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com"
+
+  controllerManager:
+    image:
+      repository: "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/thirdparty/aibrix/controller-manager"
+      tag: "0.4.1"
+
+  gatewayPlugin:
+    container:
+      image:
+        repository: "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/thirdparty/aibrix/gateway-plugins"
+        tag: "0.4.1"
+
+  gpuOptimizer:
+    container:
+      image:
+        repository: "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/thirdparty/aibrix/runtime"
+        tag: "0.4.1"
+
+  metadata:
+    service:
+      container:
+        image:
+          repository: "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/thirdparty/aibrix/metadata-service"
+          tag: "0.4.1"
+
+  gateway:
+    envoyProxy:
+      container:
+        envoy:
+          image: "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/thirdparty/envoyproxy/envoy:1.33.2"
+        gateway:
+          image:
+            repository: "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/thirdparty/envoyproxy/gateway"
+            tag: "1.2.8"
+
+# --- vLLM runtime defaults (inherited by all model configs) ---
+vllm:
+  image:
+    registry: "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com"
+    repository: "thirdparty/vllm/vllm-openai"
+    tag: "0.9.1"
+
+  tolerations:
+    - key: "nvidia.com/gpu"
+      operator: "Exists"
+      effect: "NoSchedule"
+    - key: "aibrix-deployment-type"
+      operator: "Equal"
+      value: "gpu"
+      effect: "NoSchedule"
+
+  runtimeClassName: ""
+
+# --- Model weight storage ---
+model_storage:
+  model_storage_location: "mlops-model-weights"   # S3 bucket / GCS bucket / Azure container
+
+  initContainer:
+    registry: "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com"
+    repository: "thirdparty/amazon/aws-cli"
+    tag: "2.31.26"
+
+  qwen:
+    model_path: "REPLACE_WITH_QWEN_S3_UUID"
+    lora_adapter_path: ""   # leave empty to skip LoRA init container
+
+  llama:
+    model_path: "REPLACE_WITH_LLAMA_S3_UUID"
+
+# --- Qwen model ---
+qwen:
+  enabled: true
+  modelName: "qwen-3-14b"
+  servedModelName: "qwen-3-14b"
+
+  # Per-model image override (falls back to vllm.image if empty)
+  image: {}
+
+  tensorParallelSize: "1"
+  pipelineParallelSize: "1"
+  maxModelLen: "131072"
+
+  resources:
+    requests:
+      cpu: "16"
+      memory: "48Gi"
+      nvidia.com/gpu: "1"
+    limits:
+      cpu: "32"
+      memory: "64Gi"
+      nvidia.com/gpu: "1"
+
+  dshm:
+    sizeLimit: "8Gi"
+
+  startupProbe:
+    failureThreshold: 90
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    timeoutSeconds: 5
+
+  tolerations: []
+  affinity: {}
+  env: []
+
+# --- Llama model ---
+llama:
+  enabled: false
+  modelName: "llama-3-3-70b-instruct"
+  servedModelName: "llama-3-3-70b"
+
+  image: {}
+
+  tensorParallelSize: "4"
+  pipelineParallelSize: "1"
+  maxModelLen: "8192"
+
+  resources:
+    requests:
+      cpu: "32"
+      memory: "200Gi"
+      nvidia.com/gpu: "4"
+    limits:
+      cpu: "64"
+      memory: "256Gi"
+      nvidia.com/gpu: "4"
+
+  dshm:
+    sizeLimit: "16Gi"
+
+  startupProbe:
+    failureThreshold: 90
+    initialDelaySeconds: 60
+    periodSeconds: 30
+    timeoutSeconds: 10
+
+  tolerations: []
+  affinity: {}
+  env: []

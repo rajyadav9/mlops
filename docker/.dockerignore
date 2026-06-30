@@ -1,0 +1,12 @@
+**/__pycache__
+**/*.pyc
+**/*.pyo
+.git
+.github
+.env
+*.env
+terraform/
+k8s/
+scripts/
+*.md
+.DS_Store
