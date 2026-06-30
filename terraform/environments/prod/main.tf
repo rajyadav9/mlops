@@ -20,11 +20,13 @@ locals {
 module "vpc" {
   source = "../../modules/vpc"
 
-  name         = var.name
-  cluster_name = local.cluster_name
-  vpc_cidr     = var.vpc_cidr
-  region       = var.region
-  tags         = local.common_tags
+  name                  = var.name
+  cluster_name          = local.cluster_name
+  vpc_cidr              = var.vpc_cidr
+  region                = var.region
+  enable_public_subnets = var.enable_public_subnets
+  enable_nat_gateway    = var.enable_nat_gateway
+  tags                  = local.common_tags
 }
 
 module "eks" {

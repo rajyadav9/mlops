@@ -1,0 +1,108 @@
+# NetworkPolicy for vLLM inference pods.
+# Allow rules:
+#   Ingress: ALB (internal, VPC CIDR), Prometheus scrape
+#   Egress:  DNS, VPC endpoints (HTTPS/443 to private IPs only), inter-pod TP traffic
+#
+# In an air-gapped environment, egress port 443 to the VPC CIDR only reaches
+# VPC endpoint ENIs — there is no NAT GW to forward packets to the internet.
+# NetworkPolicies here are the second enforcement layer if infra is misconfigured.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vllm-allow
+  namespace: vllm
+spec:
+  podSelector:
+    matchLabels:
+      app: vllm
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # Internal ALB → vLLM (ip target type; ALB ENI IPs are within the VPC CIDR)
+    - ports:
+        - port: 8000
+          protocol: TCP
+      from:
+        - ipBlock:
+            cidr: 10.0.0.0/8
+
+    # Prometheus scrape from monitoring namespace
+    - ports:
+        - port: 8000
+          protocol: TCP
+      from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+
+    # AIBrix gateway → vLLM (prefix-aware routing)
+    - ports:
+        - port: 8000
+          protocol: TCP
+      from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: aibrix-system
+
+  egress:
+    # DNS — must resolve VPC endpoint private DNS names
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+
+    # VPC endpoints: S3 (model weights), ECR, Secrets Manager, KMS, STS (IRSA), CloudWatch
+    # All interface endpoints have private IPs within the VPC CIDR.
+    # Gateway endpoint (S3) injects routes into the private route table directly.
+    - ports:
+        - port: 443
+          protocol: TCP
+      to:
+        - ipBlock:
+            cidr: 10.0.0.0/8
+
+    # Inter-pod tensor parallel communication (NCCL, port range used by vLLM TP)
+    # Only needed when tensor_parallel_size spans multiple pods/nodes.
+    # For single-node TP (g6e.12xlarge, intra-pod), this rule is unused but harmless.
+    - ports:
+        - port: 29500
+          protocol: TCP
+        - port: 29501
+          protocol: TCP
+      to:
+        - podSelector:
+            matchLabels:
+              app: vllm
+---
+# Allow vLLM pods to talk to each other (needed when AIBrix orchestrates
+# disaggregated prefill/decode pods in the same namespace)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vllm-intra-namespace
+  namespace: vllm
+spec:
+  podSelector:
+    matchLabels:
+      app: vllm
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: vllm

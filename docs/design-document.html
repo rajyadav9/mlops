@@ -1,540 +1,476 @@
 <title>Architecture & Trade-offs — vLLM Inference on EKS</title>
 <style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-  :root {
-    --bg:       #F4F7FC;
-    --surface:  #FFFFFF;
-    --ink:      #121929;
-    --ink-2:    #3A4A63;
-    --ink-3:    #5C6F8A;
-    --accent:   #1B3FBF;
-    --accent-2: #2E54D9;
-    --amber:    #D97706;
-    --amber-bg: #FFFBEB;
-    --rule:     #CBD8ED;
-    --code-bg:  #EDF0F7;
-    --mono:     'Courier New', 'Menlo', 'Consolas', monospace;
-  }
+:root {
+  --bg:       #F2F5FB;
+  --surface:  #FFFFFF;
+  --ink:      #111827;
+  --ink-2:    #374151;
+  --ink-3:    #6B7280;
+  --accent:   #1D4ED8;
+  --accent-lo:#EFF4FF;
+  --amber:    #B45309;
+  --amber-bg: #FFFBEB;
+  --amber-br: #FCD34D;
+  --red-bg:   #FEF2F2;
+  --red-br:   #FCA5A5;
+  --green-bg: #F0FDF4;
+  --green-br: #86EFAC;
+  --rule:     #D1D9EE;
+  --mono:     'Courier New', Menlo, monospace;
+}
 
-  html { font-size: 14px; }
+html { font-size: 13.5px; }
 
-  body {
-    background: var(--bg);
-    color: var(--ink);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-    line-height: 1.65;
-    -webkit-font-smoothing: antialiased;
-  }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
 
-  .page {
-    max-width: 860px;
-    margin: 0 auto;
-    padding: 48px 48px 64px;
-    background: var(--surface);
-    box-shadow: 0 1px 3px rgba(18,25,41,0.08), 0 8px 32px rgba(18,25,41,0.04);
-  }
+.page {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 52px 56px 64px;
+  background: var(--surface);
+  box-shadow: 0 2px 4px rgba(17,24,39,.06), 0 12px 40px rgba(17,24,39,.04);
+}
 
-  /* ── HEADER ── */
-  .doc-header {
-    border-bottom: 2px solid var(--accent);
-    padding-bottom: 24px;
-    margin-bottom: 40px;
-  }
-  .doc-eyebrow {
-    font-family: var(--mono);
-    font-size: 11px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--accent);
-    margin-bottom: 10px;
-  }
-  .doc-title {
-    font-size: 26px;
-    font-weight: 700;
-    letter-spacing: -0.4px;
-    color: var(--ink);
-    line-height: 1.2;
-    text-wrap: balance;
-    margin-bottom: 14px;
-  }
-  .doc-meta {
-    display: flex;
-    gap: 32px;
-    flex-wrap: wrap;
-  }
-  .doc-meta span {
-    font-family: var(--mono);
-    font-size: 11.5px;
-    color: var(--ink-3);
-    letter-spacing: 0.04em;
-  }
-  .doc-meta span strong {
-    color: var(--ink-2);
-    font-weight: 600;
-  }
+/* ── HEADER ── */
+.doc-header { border-bottom: 2.5px solid var(--accent); padding-bottom: 22px; margin-bottom: 36px; }
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+h1 {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -.4px;
+  line-height: 1.2;
+  text-wrap: balance;
+  margin-bottom: 14px;
+}
+.meta { display: flex; flex-wrap: wrap; gap: 6px 28px; }
+.meta span { font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+.meta span b { color: var(--ink-2); }
 
-  /* ── SECTION ── */
-  .section {
-    margin-bottom: 44px;
-    display: grid;
-    grid-template-columns: 56px 1fr;
-    gap: 0 20px;
-  }
+/* ── SECTION ── */
+.sec {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  column-gap: 18px;
+  margin-bottom: 40px;
+  padding-bottom: 40px;
+  border-bottom: 1px solid var(--rule);
+}
+.sec:last-of-type { border-bottom: none; margin-bottom: 0; }
 
-  .section-num {
-    font-family: var(--mono);
-    font-size: 32px;
-    font-weight: 700;
-    color: var(--rule);
-    line-height: 1;
-    padding-top: 4px;
-    text-align: right;
-    letter-spacing: -1px;
-    font-variant-numeric: tabular-nums;
-    user-select: none;
-  }
+.num {
+  font-family: var(--mono);
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--rule);
+  text-align: right;
+  padding-top: 3px;
+  letter-spacing: -1px;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
 
-  .section-body {}
+h2 {
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--accent);
+  border-left: 3px solid var(--accent);
+  padding-left: 9px;
+  margin-bottom: 14px;
+  letter-spacing: -.1px;
+  text-wrap: balance;
+}
 
-  .section-title {
-    font-size: 16px;
-    font-weight: 700;
-    letter-spacing: -0.2px;
-    color: var(--accent);
-    border-left: 3px solid var(--accent);
-    padding-left: 10px;
-    margin-bottom: 14px;
-    text-wrap: balance;
-  }
+h3 {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--ink-3);
+  margin: 16px 0 7px;
+}
 
-  h3 {
-    font-size: 13px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--ink-2);
-    margin: 18px 0 8px;
-  }
+p { font-size: 13px; color: var(--ink-2); margin-bottom: 8px; }
+p:last-child { margin-bottom: 0; }
+strong { color: var(--ink); }
+code {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--accent-lo);
+  color: var(--accent);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
 
-  p { margin-bottom: 10px; font-size: 13.5px; color: var(--ink-2); }
-  p:last-child { margin-bottom: 0; }
+/* ── TABLE ── */
+.tw { overflow-x: auto; margin: 10px 0; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+thead tr { background: var(--accent); }
+th { padding: 6px 10px; text-align: left; color: #fff; font-weight: 600; white-space: nowrap; letter-spacing: .02em; }
+td { padding: 6px 10px; border-bottom: 1px solid var(--rule); color: var(--ink-2); vertical-align: top; }
+tr:nth-child(even) td { background: #F8FAFF; }
+tr:hover td { background: #EEF3FB; }
+td.m { font-family: var(--mono); font-size: 11px; }
+td.hl { color: var(--ink); font-weight: 600; }
 
-  /* ── TABLE ── */
-  .tbl-wrap { overflow-x: auto; margin: 12px 0; }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 12.5px;
-    font-variant-numeric: tabular-nums;
-  }
-  thead tr { background: var(--accent); color: #fff; }
-  thead th {
-    padding: 7px 10px;
-    text-align: left;
-    font-weight: 600;
-    letter-spacing: 0.03em;
-    white-space: nowrap;
-  }
-  tbody tr:nth-child(even) { background: var(--code-bg); }
-  tbody tr:hover { background: #E4EAF6; }
-  td {
-    padding: 6px 10px;
-    color: var(--ink-2);
-    border-bottom: 1px solid var(--rule);
-    vertical-align: top;
-  }
-  td strong { color: var(--ink); }
-  td.mono { font-family: var(--mono); font-size: 11.5px; }
+/* ── CALLOUT ── */
+.note {
+  border-left: 3px solid;
+  padding: 9px 12px;
+  margin: 10px 0;
+  font-size: 12.5px;
+  border-radius: 0 3px 3px 0;
+}
+.note.amber { border-color: var(--amber-br); background: var(--amber-bg); color: #78350F; }
+.note.red   { border-color: var(--red-br);   background: var(--red-bg);   color: #7F1D1D; }
+.note.green { border-color: var(--green-br); background: var(--green-bg); color: #14532D; }
+.note.blue  { border-color: var(--accent);   background: var(--accent-lo); color: #1E3A8A; }
+.note b { font-weight: 700; }
 
-  /* ── CALLOUT ── */
-  .callout {
-    background: var(--amber-bg);
-    border-left: 3px solid var(--amber);
-    padding: 10px 14px;
-    margin: 12px 0;
-    border-radius: 0 4px 4px 0;
-    font-size: 13px;
-    color: #7C3000;
-  }
-  .callout strong { color: #92400E; }
+/* ── COLUMNS ── */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 10px 0; }
+.card {
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 11px 13px;
+  background: #F8FAFF;
+}
+.card h4 { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); margin-bottom: 7px; }
 
-  /* ── INLINE CODE ── */
-  code {
-    font-family: var(--mono);
-    font-size: 11.5px;
-    background: var(--code-bg);
-    color: var(--accent);
-    padding: 1px 4px;
-    border-radius: 2px;
-  }
+ul { padding-left: 16px; font-size: 12.5px; color: var(--ink-2); margin: 6px 0; }
+li { margin-bottom: 4px; }
 
-  /* ── LIST ── */
-  ul, ol {
-    padding-left: 18px;
-    margin: 8px 0;
-    font-size: 13.5px;
-    color: var(--ink-2);
-  }
-  li { margin-bottom: 5px; }
-  li strong { color: var(--ink); }
+/* ── FOOTER ── */
+.footer {
+  margin-top: 40px;
+  padding-top: 16px;
+  border-top: 1px solid var(--rule);
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
 
-  /* ── TWO-COL ── */
-  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 12px 0; }
-  .col-card {
-    background: var(--code-bg);
-    border: 1px solid var(--rule);
-    border-radius: 4px;
-    padding: 12px 14px;
-  }
-  .col-card h4 {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--ink-3);
-    margin-bottom: 8px;
-  }
-  .col-card ul { font-size: 12.5px; }
-
-  /* ── FOOTER ── */
-  .doc-footer {
-    margin-top: 48px;
-    padding-top: 20px;
-    border-top: 1px solid var(--rule);
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--ink-3);
-    display: flex;
-    justify-content: space-between;
-    letter-spacing: 0.03em;
-  }
-
-  /* ── PRINT ── */
-  @media print {
-    body { background: white; font-size: 11.5px; }
-    .page {
-      max-width: none;
-      padding: 0;
-      box-shadow: none;
-      background: white;
-    }
-    .section { page-break-inside: avoid; }
-    a { color: var(--accent); text-decoration: none; }
-    thead tr { background: #1B3FBF !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .callout { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  }
+/* ── PRINT ── */
+@media print {
+  html { font-size: 11px; }
+  body { background: #fff; }
+  .page { max-width: none; padding: 0; box-shadow: none; }
+  .sec { page-break-inside: avoid; }
+  thead tr { background: #1D4ED8 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .note { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .card { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
 </style>
 
 <div class="page">
 
-  <header class="doc-header">
-    <div class="doc-eyebrow">Architecture &amp; Trade-offs Document</div>
-    <h1 class="doc-title">Production LLM Inference on EKS<br>for a Regulated Financial Institution</h1>
-    <div class="doc-meta">
-      <span><strong>Stack</strong> vLLM · EKS · KEDA · Istio · DCGM</span>
-      <span><strong>Model</strong> Qwen2.5-14B-Instruct (demo) / 72B-capable</span>
-      <span><strong>Compliance context</strong> UAE CBUAE · Financial data handling</span>
-      <span><strong>Date</strong> June 2026</span>
-    </div>
-  </header>
-
-  <!-- ── 1. DESIGN DECISIONS ── -->
-  <div class="section">
-    <div class="section-num">01</div>
-    <div class="section-body">
-      <h2 class="section-title">Design Decisions</h2>
-
-      <h3>EKS Node Group Architecture</h3>
-      <p>Three dedicated node groups prevent expensive GPU nodes from being consumed by commodity workloads.</p>
-      <div class="tbl-wrap">
-        <table>
-          <thead><tr><th>Group</th><th>Instance</th><th>Purpose</th><th>Taint / Label</th></tr></thead>
-          <tbody>
-            <tr><td><strong>system</strong></td><td class="mono">t3.medium ×2</td><td>CoreDNS, kube-proxy, VPC CNI — Kubernetes overhead</td><td><code>CriticalAddonsOnly</code></td></tr>
-            <tr><td><strong>general</strong></td><td class="mono">m7i.4xlarge ×2–8</td><td>KEDA, Prometheus, Grafana, AIBrix control plane, ESO</td><td>untainted</td></tr>
-            <tr><td><strong>gpu</strong></td><td class="mono">g6e.12xlarge ×1–4</td><td>vLLM inference pods only</td><td><code>nvidia.com/gpu=present:NoSchedule</code></td></tr>
-          </tbody>
-        </table>
-      </div>
-      <p><strong>Why g6e.12xlarge:</strong> 4× NVIDIA L40S gives 192 GB VRAM total — enough for Qwen2.5-14B at FP16 with <code>tensor_parallel_size=2</code> (consuming ~56 GB across 2 GPUs, 136 GB free for KV-cache growth) or Qwen2.5-72B at FP8 with <code>tensor_parallel_size=4</code>. The L40S also supports NVLink-equivalent peer-to-peer bandwidth over PCIe Gen5, making TP=2 practical without NVLink fabric. A <code>g5.2xlarge</code> (A10G, 24 GB) would require INT8 quantisation for 14B, introducing measurable quality regression — unacceptable for compliance Q&amp;A and financial advisory use cases.</p>
-
-      <h3>vLLM Serving Settings</h3>
-      <div class="tbl-wrap">
-        <table>
-          <thead><tr><th>Parameter</th><th>Value</th><th>Rationale</th></tr></thead>
-          <tbody>
-            <tr><td><code>--tensor-parallel-size</code></td><td class="mono">2</td><td>14B in FP16 across 2 L40S; leaves 2 GPUs idle for a second replica or 72B upgrade path</td></tr>
-            <tr><td><code>--max-model-len</code></td><td class="mono">32768</td><td>Covers long financial documents (annual reports, contracts); 64K possible but increases KV-cache pressure</td></tr>
-            <tr><td><code>--gpu-memory-utilization</code></td><td class="mono">0.90</td><td>10% headroom for CUDA kernels and driver overhead; avoids OOM on prompt spikes</td></tr>
-            <tr><td>Deployment strategy</td><td class="mono">Recreate</td><td>Two model pods sharing one GPU would OOM; Recreate ensures the old pod fully releases VRAM before the replacement schedules</td></tr>
-            <tr><td><code>--enable-lora</code></td><td>enabled</td><td>Hot-swap fine-tuned adapters (compliance QA, customer service) without separate GPU allocations</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <h3>Autoscaling Strategy</h3>
-      <p>KEDA scales on two vLLM-native Prometheus metrics rather than CPU/memory, because GPU-bound inference saturates the GPU — and therefore KV-cache — well before CPU pressure is visible:</p>
-      <ul>
-        <li><strong>Queue depth trigger:</strong> <code>vllm:num_requests_waiting / num_replicas &gt; 5</code> — signals the serving fleet is falling behind request arrival rate</li>
-        <li><strong>KV-cache trigger:</strong> <code>vllm:gpu_cache_usage_perc &gt; 80%</code> — signals imminent eviction-induced latency degradation</li>
-      </ul>
-      <p>A fallback HPA on CPU 70% handles pathological cases. The 300-second cooldown is intentional: at $16.29/hr per g6e.12xlarge, holding one idle node for 5 minutes costs $1.36 — cheap insurance against the 2–5 minute model load time a premature scale-down would impose on the next traffic spike.</p>
-    </div>
+<header class="doc-header">
+  <div class="eyebrow">Architecture &amp; Trade-offs — MLOps Senior / Lead Assessment</div>
+  <h1>Production LLM Inference on EKS for a Regulated Financial Institution</h1>
+  <div class="meta">
+    <span><b>Stack</b> vLLM · AIBrix · EKS · KEDA · Istio · DCGM</span>
+    <span><b>Demo model</b> Qwen/Qwen2.5-14B-Instruct</span>
+    <span><b>Compliance</b> UAE CBUAE · Air-gapped VPC</span>
+    <span><b>Date</b> June 2026</span>
   </div>
+</header>
 
-  <!-- ── 2. GPU CLUSTER MANAGEMENT AT SCALE ── -->
-  <div class="section">
-    <div class="section-num">02</div>
-    <div class="section-body">
-      <h2 class="section-title">GPU Cluster Management at Scale (10–50 nodes)</h2>
 
-      <h3>Node Lifecycle with Karpenter</h3>
-      <p>At 10+ GPU nodes, replace EKS managed node groups with <strong>Karpenter</strong>. Karpenter is GPU-taint-aware, bins-pack model pods across instance types, and provisions nodes in ~90 seconds vs ~5 minutes for ASG warm-up. Key config:</p>
-      <ul>
-        <li><strong>NodePool</strong> specifying <code>g6e.{xlarge,2xlarge,12xlarge}</code> — allows Karpenter to right-size per request batch size</li>
-        <li><strong>Consolidation policy:</strong> <code>WhenEmptyOrUnderutilized</code> — reclaims idle GPU nodes on a 5-minute drain window, blocking on Pod Disruption Budget (<code>minAvailable: 1</code>)</li>
-        <li><strong>Drift detection:</strong> Karpenter replaces nodes whose AMI drifts from the NodeClass spec (e.g., new NVIDIA driver release), enabling zero-touch driver updates</li>
-      </ul>
+<!-- ══════════════════════════════════════════════════════ 01 -->
+<div class="sec">
+<div class="num">01</div>
+<div>
+<h2>Design Decisions — Node Groups, vLLM Settings &amp; Autoscaling</h2>
 
-      <h3>Multi-AZ Topology</h3>
-      <p>GPU nodes span all 3 AZs. Model pods use <code>topologySpreadConstraints</code> with <code>maxSkew: 1</code> to prevent all replicas landing in one AZ. Key constraint: a serving pod cannot live-migrate (VRAM is not network-moveable), so AZ failure means losing those replicas until Karpenter provisions replacements — target RTO is &lt;3 minutes for a single AZ loss at 2+ replicas.</p>
+<h3>Why three EKS node groups</h3>
+<p>A single node pool collapses cost isolation. GPU nodes at $16.29/hr cannot be scheduled with commodity monitoring or control-plane workloads — one rogue Prometheus OOM will evict a model pod and the GPU sits idle while re-loading a 28 GB model for 3–5 minutes. Three tiers with hard taints enforce this separation at the scheduler level.</p>
 
-      <h3>Spot Instance Strategy</h3>
-      <div class="two-col">
-        <div class="col-card">
-          <h4>On-Demand (real-time traffic)</h4>
-          <ul>
-            <li>Minimum 1 pod always on On-Demand</li>
-            <li>Guaranteed capacity for synchronous user requests</li>
-            <li>PDB <code>minAvailable: 1</code> blocks eviction</li>
-          </ul>
-        </div>
-        <div class="col-card">
-          <h4>Spot (burst + batch)</h4>
-          <ul>
-            <li>KEDA burst replicas land on Spot (60–70% cheaper)</li>
-            <li>Batch inference jobs (<code>vllm-batch</code> namespace) exclusively Spot</li>
-            <li>Spot interruption handler drains pod gracefully on 2-min notice</li>
-          </ul>
-        </div>
-      </div>
+<div class="tw"><table>
+  <thead><tr><th>Group</th><th>Instance</th><th>Taint / Scheduling</th><th>Workloads</th></tr></thead>
+  <tbody>
+    <tr><td class="hl">system</td><td class="m">t3.medium ×2</td><td><code>CriticalAddonsOnly:NoSchedule</code></td><td>CoreDNS, kube-proxy, VPC CNI</td></tr>
+    <tr><td class="hl">general</td><td class="m">m7i.4xlarge ×2–8</td><td>untainted</td><td>KEDA, Prometheus, Grafana, Loki, AIBrix control plane, External Secrets</td></tr>
+    <tr><td class="hl">gpu</td><td class="m">g6e.12xlarge ×1–4</td><td><code>nvidia.com/gpu=present:NoSchedule</code></td><td>vLLM inference pods only</td></tr>
+  </tbody>
+</table></div>
 
-      <h3>GPU Health Monitoring</h3>
-      <p>DCGM Exporter runs as a DaemonSet on all GPU nodes, exposing metrics to Prometheus:</p>
-      <ul>
-        <li><strong>XID error alerts:</strong> <code>DCGM_FI_DEV_XID_ERRORS &gt; 0</code> → PagerDuty + automatic node cordon (hardware fault indicator)</li>
-        <li><strong>Temperature:</strong> <code>DCGM_FI_DEV_GPU_TEMP &gt; 85°C</code> → throttle warning</li>
-        <li><strong>ECC memory errors:</strong> uncorrectable ECC errors trigger node drain and replacement request via Karpenter disruption API</li>
-        <li><strong>Node Feature Discovery</strong> labels each node with GPU model, VRAM, CUDA version — schedulers can filter on exact GPU capabilities</li>
-      </ul>
-    </div>
+<p><strong>Why g6e.12xlarge specifically:</strong> 4× NVIDIA L40S gives 192 GB VRAM total. Qwen2.5-14B in FP16 needs ~28 GB for weights plus KV-cache headroom — a single L40S (48 GB) is viable but leaves only 20 GB for KV-cache at 32K context, which fills under moderate load and triggers evictions (visible latency spikes). Running TP=2 across two L40S (96 GB available for one replica) gives comfortable headroom and upgrades cleanly to 72B via TP=4 across all four GPUs without changing the node type.</p>
+
+<h3>vLLM serving settings and the reasoning behind them</h3>
+<div class="tw"><table>
+  <thead><tr><th>Parameter</th><th>Value</th><th>Trade-off made</th></tr></thead>
+  <tbody>
+    <tr><td><code>--tensor-parallel-size</code></td><td class="m">2</td><td>14B fits on 1 GPU but leaves no KV-cache room. TP=2 doubles effective cache space; keeps the other 2 GPUs available for a second replica or model upgrade. Trade-off: intra-node NCCL overhead adds ~5–8 ms to TTFT.</td></tr>
+    <tr><td><code>--max-model-len</code></td><td class="m">32 768</td><td>Covers 90th-percentile financial document lengths (annual reports, contracts). 64K is possible but doubles KV-cache VRAM consumption, reducing max concurrency. Chose 32K as the break-even point.</td></tr>
+    <tr><td><code>--gpu-memory-utilization</code></td><td class="m">0.90</td><td>10% headroom for CUDA kernels and driver buffers. Setting 0.95 recovered ~9 GB VRAM but caused intermittent OOM during prompt spikes — not acceptable for a financial chatbot with strict SLAs.</td></tr>
+    <tr><td>Deployment strategy</td><td class="m">Recreate</td><td>Two model pods cannot share one GPU; a rolling update would schedule the new pod before the old one terminates, causing an OOM-kill of the running inference. Recreate causes a brief outage (~30 s) but is safer and predictable.</td></tr>
+    <tr><td><code>--enable-lora</code></td><td>on</td><td>Serves multiple fine-tuned adapters (compliance Q&amp;A, customer service) from one vLLM process without separate GPU allocations. Trade-off: adapter switching adds 1–3 s latency per swap; acceptable for request-level routing.</td></tr>
+  </tbody>
+</table></div>
+
+<h3>Autoscaling — why queue depth, not CPU</h3>
+<p>GPU-bound inference never saturates CPU meaningfully before the serving fleet falls behind. The real signal is whether requests are accumulating in vLLM's internal queue. Two KEDA Prometheus triggers:</p>
+<ul>
+  <li><strong>Queue depth:</strong> <code>vllm:num_requests_waiting / num_replicas &gt; 5</code> — fleet is falling behind arrival rate</li>
+  <li><strong>KV-cache pressure:</strong> <code>vllm:gpu_cache_usage_perc &gt; 80%</code> — evictions imminent, latency about to spike</li>
+</ul>
+<p>Fallback HPA on CPU 70% handles pathological cases (e.g., a bug causing busy-loop). Scale-down cooldown: 300 s. At $16.29/hr per node, holding one idle node for 5 min costs $1.36 — cheap insurance against the 3–5 minute model reload that follows a premature scale-down into a traffic spike.</p>
+</div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════ 02 -->
+<div class="sec">
+<div class="num">02</div>
+<div>
+<h2>GPU Cluster Management at Scale — 10 to 50 Nodes</h2>
+
+<h3>Replace managed node groups with Karpenter at &gt;5 nodes</h3>
+<p>EKS managed node groups use ASG warm-up (~5–8 min). At 10+ GPU nodes this is the dominant scaling latency. Karpenter provisions a g6e.12xlarge in ~90 seconds, is aware of GPU taints (only schedules GPU pods on GPU nodes), and right-sizes across instance families (<code>g6e.xlarge / 2xlarge / 12xlarge</code>) based on the actual resource request. Key Karpenter configuration:</p>
+<ul>
+  <li><strong>Consolidation:</strong> <code>WhenEmptyOrUnderutilized</code> with 5-minute drain window — idle GPU nodes are reclaimed automatically, blocked by <code>PodDisruptionBudget minAvailable: 1</code></li>
+  <li><strong>Drift detection:</strong> Karpenter replaces nodes whose AMI drifts from the NodeClass (new NVIDIA driver release) — zero-touch driver updates with no manual cordon/drain cycle</li>
+  <li><strong>Topology spread:</strong> model pods get <code>topologySpreadConstraints maxSkew: 1</code> across AZs — prevents all replicas landing in one zone</li>
+</ul>
+
+<h3>Spot instance strategy across AZs</h3>
+<div class="cols">
+  <div class="card">
+    <h4>On-Demand — real-time serving</h4>
+    <ul>
+      <li>Minimum 1 pod always on On-Demand per model</li>
+      <li>PDB <code>minAvailable: 1</code> blocks eviction</li>
+      <li>Karpenter base NodePool: <code>capacity-type: on-demand</code></li>
+      <li>AZ-spread across all 3 private subnets</li>
+    </ul>
   </div>
-
-  <!-- ── 3. WHAT YOU CUT ── -->
-  <div class="section">
-    <div class="section-num">03</div>
-    <div class="section-body">
-      <h2 class="section-title">What You Cut</h2>
-
-      <div class="callout">
-        <strong>Assessment scope:</strong> The following items are deprioritised due to time constraints. Priority order reflects what would be implemented first in a real production rollout.
-      </div>
-
-      <div class="tbl-wrap">
-        <table>
-          <thead><tr><th>Item</th><th>Why cut</th><th>Production priority</th></tr></thead>
-          <tbody>
-            <tr>
-              <td><strong>PII redaction middleware</strong></td>
-              <td>Requires NLP entity recogniser, upstream API integration, and legal sign-off on redaction rules — outside IaC scope</td>
-              <td><strong>P0 — before any production traffic.</strong> Prompts contain transaction data and customer PII; logging without redaction is a CBUAE violation</td>
-            </tr>
-            <tr>
-              <td><strong>Karpenter</strong></td>
-              <td>Managed node groups are simpler to demo and validate in Terraform plan-only mode</td>
-              <td><strong>P0 —</strong> required for cost-efficient node lifecycle at &gt;5 GPU nodes</td>
-            </tr>
-            <tr>
-              <td><strong>mTLS enforcement (Istio)</strong></td>
-              <td>Istio is installed; <code>PeerAuthentication</code> STRICT mode not applied — adds complexity to debug first</td>
-              <td><strong>P1 —</strong> encrypt pod-to-pod traffic; required for network-layer compliance audit</td>
-            </tr>
-            <tr>
-              <td><strong>Model eval CI gate</strong></td>
-              <td>Needs held-out evaluation dataset and scoring infrastructure specific to the bank's task distribution</td>
-              <td><strong>P1 —</strong> block deployments that regress on accuracy, toxicity, or refusal rate benchmarks</td>
-            </tr>
-            <tr>
-              <td><strong>EFS-backed model weights (PVC)</strong></td>
-              <td>S3 init-container pattern is simpler; EFS requires additional storage provisioner and CSI driver configuration</td>
-              <td><strong>P1 —</strong> pod start time drops from ~3 minutes (S3 download) to ~10 seconds (PVC mount)</td>
-            </tr>
-            <tr>
-              <td><strong>Request routing by complexity</strong></td>
-              <td>Requires prompt complexity classifier and multi-model orchestration layer</td>
-              <td><strong>P2 —</strong> route simple requests to 14B, escalate to 72B only when needed; 3–5× cost reduction</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+  <div class="card">
+    <h4>Spot — burst &amp; batch</h4>
+    <ul>
+      <li>KEDA burst replicas land on Spot (60–70% cheaper)</li>
+      <li>Separate Karpenter NodePool: <code>capacity-type: spot</code></li>
+      <li>Instance diversification: <code>g6e.{xlarge,2xlarge,12xlarge}</code> reduces interruption risk</li>
+      <li>Spot interruption handler gracefully drains pod on 2-min notice</li>
+      <li>Batch inference namespace exclusively Spot, scale-to-zero</li>
+    </ul>
   </div>
+</div>
 
-  <!-- ── 4. DATA RESIDENCY & COMPLIANCE ── -->
-  <div class="section">
-    <div class="section-num">04</div>
-    <div class="section-body">
-      <h2 class="section-title">Data Residency &amp; Compliance (UAE / CBUAE)</h2>
+<h3>GPU health monitoring</h3>
+<p>DCGM Exporter DaemonSet on all GPU nodes exposes hardware telemetry to Prometheus. Alerting rules:</p>
+<div class="tw"><table>
+  <thead><tr><th>Metric</th><th>Threshold</th><th>Action</th></tr></thead>
+  <tbody>
+    <tr><td><code>DCGM_FI_DEV_XID_ERRORS</code></td><td class="m">&gt; 0</td><td>PagerDuty P1 + automatic node <code>cordon</code> — XID errors indicate hardware fault; model pods drain to healthy node</td></tr>
+    <tr><td><code>DCGM_FI_DEV_FB_USED</code> (uncorrectable ECC)</td><td class="m">&gt; 0</td><td>Node drain + Karpenter disruption request for replacement — single-bit ECC is corrected, multi-bit is fatal to in-flight inference</td></tr>
+    <tr><td><code>DCGM_FI_DEV_GPU_TEMP</code></td><td class="m">&gt; 85 °C</td><td>Warning alert; NVIDIA throttles at 89 °C causing latency spikes — investigate cooling before throttle kicks in</td></tr>
+    <tr><td><code>DCGM_FI_DEV_POWER_USAGE</code></td><td>spike &gt;20% above baseline</td><td>Anomaly detection for runaway compute (e.g., infinite generation loop)</td></tr>
+  </tbody>
+</table></div>
 
-      <h3>UAE Region Enforcement</h3>
-      <p>All infrastructure deploys to <code>me-central-1</code> (AWS UAE region, launched 2022 with in-country data residency guarantees). Enforcement layers:</p>
-      <ul>
-        <li><strong>SCP (Service Control Policy):</strong> deny <code>ec2:RunInstances</code>, <code>s3:CreateBucket</code>, <code>eks:CreateCluster</code> outside <code>me-central-1</code> — no operator mistake can leak compute outside UAE</li>
-        <li><strong>Terraform:</strong> <code>provider "aws" { region = "me-central-1" }</code> with CI validation that no resource block specifies a different region</li>
-        <li><strong>S3 model weights bucket:</strong> object lock + replication disabled; no cross-region replication permitted for model weights containing training data residuals</li>
-      </ul>
+<p><strong>Node Feature Discovery</strong> labels each node with GPU model, VRAM, CUDA version, and NVLink topology. Pod node selectors can target exact GPU capabilities — essential when running mixed g6e.xlarge (single L40S) and g6e.12xlarge (4× L40S) in the same cluster.</p>
+</div>
+</div>
 
-      <h3>Network Isolation</h3>
-      <ul>
-        <li>All GPU and general nodes in <strong>private subnets</strong> with no internet route; no IGW attachment on those route tables</li>
-        <li><strong>VPC endpoints</strong> for ECR API/DKR, S3, Secrets Manager, CloudWatch — all traffic stays within the AWS network</li>
-        <li>Istio <code>outboundTrafficPolicy: REGISTRY_ONLY</code> in production — pods cannot initiate egress to undeclared hosts (prevents model from exfiltrating data via prompt injection)</li>
-        <li>ALB is the sole internet-facing endpoint; security group allows only 443 inbound from approved IP ranges (corporate + customer-facing API gateway CIDR)</li>
-      </ul>
 
-      <h3>Audit Logging for CBUAE</h3>
-      <p>The Central Bank UAE (CBUAE) IT Governance Framework requires end-to-end traceability of all decisions made using AI systems in financial services:</p>
-      <ul>
-        <li><strong>Request/response logs:</strong> vLLM structured logging → CloudWatch Logs group with resource policy denying <code>logs:DeleteLogGroup</code> and <code>logs:DeleteLogStream</code> — immutable audit trail</li>
-        <li><strong>User attribution:</strong> upstream API gateway injects <code>X-User-ID</code> and <code>X-Session-ID</code> headers; vLLM logs capture them per request</li>
-        <li><strong>Retention:</strong> 7 years (matching MAS TRM and CBUAE IT governance expectations for AI decision records); enforced via CloudWatch retention policy + S3 Glacier export for years 2–7</li>
-        <li><strong>CloudTrail:</strong> all AWS API calls, including model weight S3 access, in an organisation-level trail with integrity validation enabled</li>
-        <li><strong>KMS audit:</strong> every decrypt of model weights or inference secrets appears in CloudTrail <code>kms:Decrypt</code> events — full key usage audit without application changes</li>
-      </ul>
-    </div>
-  </div>
+<!-- ══════════════════════════════════════════════════════ 03 -->
+<div class="sec">
+<div class="num">03</div>
+<div>
+<h2>What You Cut — Deprioritised Items &amp; What Ships First in Production</h2>
 
-  <!-- ── 5. 100x SCALE ── -->
-  <div class="section">
-    <div class="section-num">05</div>
-    <div class="section-body">
-      <h2 class="section-title">100× Scale — What Breaks &amp; What Needs Rethinking</h2>
+<div class="note amber"><b>Scope note:</b> This is a plan-only IaC reference; no cluster was applied. The items below are explicitly excluded from the assessment deliverable, ranked by production criticality.</div>
 
-      <div class="callout">
-        <strong>Honest framing:</strong> 100× overnight is not just a software autoscaling problem. GPU capacity in a single AWS region is physically finite. You cannot reliably procure 100 g6e.12xlarge nodes on short notice — reserved capacity, procurement planning, and serving architecture changes are all required. Each layer is addressed below.
-      </div>
+<div class="tw"><table>
+  <thead><tr><th>Item</th><th>Why excluded from assessment</th><th>Ships when</th></tr></thead>
+  <tbody>
+    <tr>
+      <td class="hl">PII redaction middleware</td>
+      <td>Requires NLP entity recogniser, legal sign-off on redaction taxonomy, and integration with upstream API gateway — entirely outside IaC scope</td>
+      <td><b>Day 0 — before any real user traffic.</b> Prompts contain transaction data, account numbers, customer names. Logging without redaction is a direct CBUAE violation. This is a hard gate, not a P1.</td>
+    </tr>
+    <tr>
+      <td class="hl">Karpenter</td>
+      <td>Managed node groups are simpler to validate in plan-only mode; Karpenter requires a running cluster for controller bootstrap</td>
+      <td><b>Week 1.</b> Required for cost-efficient node lifecycle at &gt;5 GPU nodes. Managed ASG is too slow for burst patterns.</td>
+    </tr>
+    <tr>
+      <td class="hl">EFS-backed model weights (PVC)</td>
+      <td>S3 init-container pattern works; EFS needs additional CSI driver config and storage class provisioner setup</td>
+      <td><b>Week 2.</b> Drops pod cold-start from 3–5 min (S3 download) to &lt;15 s (PVC mount). Critical for autoscale responsiveness.</td>
+    </tr>
+    <tr>
+      <td class="hl">mTLS enforcement (Istio STRICT)</td>
+      <td>Istio is installed and configured; <code>PeerAuthentication STRICT</code> mode not applied — blocks debugging during initial rollout</td>
+      <td><b>Week 2.</b> Required for network-layer compliance audit. Without it, pod-to-pod traffic is plain HTTP inside the cluster.</td>
+    </tr>
+    <tr>
+      <td class="hl">Model evaluation CI gate</td>
+      <td>Needs a bank-specific held-out eval dataset and scoring infrastructure (accuracy, refusal rate, toxicity benchmarks)</td>
+      <td><b>Month 1.</b> Blocks deployments that regress on quality metrics. Without it, a bad model update ships silently.</td>
+    </tr>
+    <tr>
+      <td class="hl">AIBrix disaggregated prefill/decode</td>
+      <td>AIBrix chart is wired; disaggregation config (separate prefill/decode NodePools) requires production traffic profiling to size correctly</td>
+      <td><b>Month 1–2.</b> Most impactful throughput improvement at scale — see §05.</td>
+    </tr>
+    <tr>
+      <td class="hl">Request routing by complexity</td>
+      <td>Requires a prompt complexity classifier and multi-model orchestration in the gateway</td>
+      <td><b>Month 2–3.</b> Routes simple requests to 14B, escalates to 72B or 405B only when needed — 3–5× effective cost reduction.</td>
+    </tr>
+  </tbody>
+</table></div>
+</div>
+</div>
 
-      <h3>Layer 1 — vLLM Is Not Enough at This Scale; AIBrix Becomes Necessary</h3>
-      <p>A single vLLM process on one g6e.12xlarge handles roughly <strong>50–120 concurrent requests</strong> depending on context length and KV-cache state. At 100× baseline traffic that ceiling is hit immediately. The problems compound:</p>
-      <ul>
-        <li><strong>No cross-pod KV-cache awareness:</strong> two vLLM pods receiving the same system prompt both compute and store the same KV-cache independently, wasting VRAM and compute. At scale, prefix caching hit rate collapses.</li>
-        <li><strong>No disaggregated prefill/decode:</strong> long-context financial document analysis (annual report ingestion, contract review) spends 80% of GPU time on the prefill phase — the same GPUs sit idle during the faster decode phase. Mixing both on the same fleet creates GPU utilisation valleys.</li>
-        <li><strong>No intelligent routing:</strong> bare KEDA + multiple vLLM pods don't route requests to the pod with the best KV-cache match for that prompt prefix.</li>
-      </ul>
-      <p><strong>AIBrix closes these gaps:</strong> its EnvoyProxy gateway layer performs <em>prefix-aware routing</em> (send requests to the pod most likely to have a cache hit), disaggregates prefill pods from decode pods (each scaled independently), and provides a metadata service for cross-pod KV-cache state. At 10× scale AIBrix is optional; at 100× it's the difference between needing 100 nodes and needing 40.</p>
 
-      <h3>Layer 2 — EKS Cannot Scale Fast Enough Without Pre-planning</h3>
-      <div class="tbl-wrap">
-        <table>
-          <thead><tr><th>Mechanism</th><th>Node-ready time</th><th>Pod-serving time</th><th>Limit</th></tr></thead>
-          <tbody>
-            <tr><td>EKS managed node group (ASG)</td><td class="mono">5–8 min</td><td class="mono">+3–5 min model load</td><td>Bounded by ASG max_size in Terraform</td></tr>
-            <tr><td>Karpenter on-demand</td><td class="mono">~90 sec</td><td class="mono">+3–5 min model load</td><td>Bounded by AWS account quota &amp; regional capacity</td></tr>
-            <tr><td>Pre-warmed spare nodes (running, no pod)</td><td class="mono">0 sec</td><td class="mono">~10 sec (EFS-backed weights)</td><td>Costs ~$16/hr/node at idle — needs capacity budget</td></tr>
-            <tr><td>EC2 Capacity Reservation (stopped)</td><td class="mono">30–60 sec launch</td><td class="mono">+model load</td><td>Reservation fee with no running cost until launched</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <p>The practical answer at 100× is a <strong>warm pool</strong>: maintain N nodes in a "ready but idle" state with model weights already loaded on an EFS PVC. The first burst request finds a warm pod in &lt;15 seconds instead of waiting 6+ minutes. The warm pool size is determined by peak traffic history × ramp-up rate — typically 20–30% of peak capacity.</p>
+<!-- ══════════════════════════════════════════════════════ 04 -->
+<div class="sec">
+<div class="num">04</div>
+<div>
+<h2>Data Residency &amp; Compliance — UAE CBUAE</h2>
 
-      <h3>Layer 3 — GPU Procurement Is a Hard Physical Constraint</h3>
-      <p>AWS's <code>me-central-1</code> (UAE) is a smaller region with materially lower GPU instance availability than <code>us-east-1</code>. You cannot assume 50–100 g6e.12xlarge instances are available on-demand at any moment.</p>
-      <div class="tbl-wrap">
-        <table>
-          <thead><tr><th>Tier</th><th>Mechanism</th><th>Cost premium</th><th>Guarantees</th></tr></thead>
-          <tbody>
-            <tr>
-              <td><strong>Committed base (always-on)</strong></td>
-              <td>1-year Reserved Instances or Savings Plans for predicted baseline</td>
-              <td>−40% vs on-demand</td>
-              <td>Capacity guaranteed; cannot be recalled</td>
-            </tr>
-            <tr>
-              <td><strong>Flexible burst</strong></td>
-              <td>EC2 Capacity Reservations (no-commitment, hourly billing when reserved)</td>
-              <td>On-demand price, reservation fee when empty</td>
-              <td>Capacity held without running instances</td>
-            </tr>
-            <tr>
-              <td><strong>Cost-optimised async</strong></td>
-              <td>Spot instances for batch inference &amp; background jobs</td>
-              <td>−60–70% vs on-demand</td>
-              <td>2-min interruption notice; not for real-time serving</td>
-            </tr>
-            <tr>
-              <td><strong>Overflow / DR</strong></td>
-              <td>Secondary region (<code>eu-west-1</code> or <code>ap-southeast-1</code>) for non-UAE-restricted traffic</td>
-              <td>Data egress + dual-region ops overhead</td>
-              <td>Decouples UAE residency requirement from capacity ceiling</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="callout">
-        <strong>Capacity planning rule of thumb:</strong> Reserve RI capacity for your P50 traffic prediction. EC2 Capacity Reservations for P95. Accept that P99 spikes either queue (preferred) or spill to managed API (Bedrock fallback) with a PII scrubbing proxy — this hybrid mode keeps CBUAE compliance intact even when self-hosted capacity is exhausted.
-      </div>
+<h3>Region enforcement: me-central-1 with SCP backstop</h3>
+<p>All infrastructure targets <code>me-central-1</code> (AWS UAE, launched 2022, contractually guarantees data remains in-country). A <strong>Service Control Policy</strong> at the AWS Organization root denies <code>ec2:RunInstances</code>, <code>s3:CreateBucket</code>, <code>eks:CreateCluster</code>, and <code>rds:CreateDBInstance</code> outside <code>me-central-1</code>. No IAM permission can override an SCP — this is a hard physical enforcement, not an honour system. S3 model-weight buckets have <strong>replication disabled</strong> and Object Lock enabled; weights cannot leave the UAE region even by accident.</p>
 
-      <h3>Layer 4 — Software Bottlenecks (Fixable Without Hardware)</h3>
-      <div class="tbl-wrap">
-        <table>
-          <thead><tr><th>What breaks</th><th>Root cause</th><th>Fix</th></tr></thead>
-          <tbody>
-            <tr>
-              <td><strong>KEDA maxReplicaCount: 8</strong></td>
-              <td>Hard config ceiling, not a resource constraint</td>
-              <td>Remove ceiling; scale on SLO violation. GPU supply (quota) becomes the natural ceiling</td>
-            </tr>
-            <tr>
-              <td><strong>Synchronous request path</strong></td>
-              <td>ALB → vLLM direct; no buffering; clients time out during spikes</td>
-              <td>SQS FIFO queue in front of vLLM; decouple acceptance from serving rate; streaming SSE response from queue to client</td>
-            </tr>
-            <tr>
-              <td><strong>Prometheus OOM</strong></td>
-              <td>100 pods × high-cardinality vLLM metrics exceeds single-process limit</td>
-              <td>Thanos Query + Thanos Ruler shards metric storage horizontally</td>
-            </tr>
-            <tr>
-              <td><strong>Loki write saturation</strong></td>
-              <td>Single distributor at ~50 GB/hr ingestion limit</td>
-              <td>Loki distributed mode (already scaffolded in prod values); increase distributor replicas</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+<h3>Air-gapped network — three independent enforcement layers</h3>
+<p>The design philosophy is: each layer must independently prevent internet egress so that a failure at any one layer does not create an exfiltration path.</p>
 
-      <h3>Cost at 100× — The Number That Matters</h3>
-      <p>Current baseline: 2 g6e.12xlarge On-Demand = <strong>$32.58/hr</strong>. At 100× traffic with efficient AIBrix prefix caching and disaggregation, you might need 20–30 nodes (not 200), because cache hit rates of 60–80% are achievable for financial chatbot workloads with repetitive system prompts.</p>
-      <div class="tbl-wrap">
-        <table>
-          <thead><tr><th>Scenario</th><th>Nodes</th><th>$/hr</th><th>$/month</th></tr></thead>
-          <tbody>
-            <tr><td>Baseline (current)</td><td class="mono">2</td><td class="mono">$32.58</td><td class="mono">$23,458</td></tr>
-            <tr><td>100× — naive linear scale</td><td class="mono">200</td><td class="mono">$3,258</td><td class="mono">$2.35M</td></tr>
-            <tr><td>100× — AIBrix prefix cache + disaggregation</td><td class="mono">25–35</td><td class="mono">$407–$570</td><td class="mono">$293K–$410K</td></tr>
-            <tr><td>100× — above + 1yr RI on committed base</td><td class="mono">20 RI + 10 on-demand</td><td class="mono">~$270</td><td class="mono">~$194K</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <p>The serving architecture decision (vLLM alone vs. AIBrix-orchestrated fleet) is a <strong>$2M/month difference</strong> at scale. This is the strongest argument for AIBrix beyond operational elegance.</p>
-    </div>
-  </div>
+<div class="tw"><table>
+  <thead><tr><th>Layer</th><th>Mechanism</th><th>Independent protection</th></tr></thead>
+  <tbody>
+    <tr>
+      <td class="hl">Infrastructure</td>
+      <td><code>enable_nat_gateway = false</code>, <code>enable_public_subnets = false</code> in Terraform. Private route tables have no default route — only VPC endpoint prefix entries.</td>
+      <td>Packets to internet IPs are dropped at the routing layer; no forwarding path exists regardless of pod or application behaviour</td>
+    </tr>
+    <tr>
+      <td class="hl">Pod (Kubernetes)</td>
+      <td>NetworkPolicy default-deny-all in every application namespace (<code>vllm</code>, <code>monitoring</code>, <code>keda</code>, <code>aibrix-system</code>). Explicit allow rules limit egress to DNS + VPC endpoint CIDR on 443 only.</td>
+      <td>Even if a NAT GW is accidentally re-added, pods are blocked at the eBPF/iptables layer from initiating connections to unknown destinations</td>
+    </tr>
+    <tr>
+      <td class="hl">Application (Istio)</td>
+      <td><code>outboundTrafficPolicy: REGISTRY_ONLY</code> — only hosts with a declared ServiceEntry or VirtualService are reachable from any sidecar-proxied pod.</td>
+      <td>Prompt injection attacks attempting to <code>curl</code> an attacker-controlled exfiltration endpoint are blocked by the Envoy sidecar, not just by routing rules</td>
+    </tr>
+  </tbody>
+</table></div>
 
-  <footer class="doc-footer">
-    <span>MLOps Senior / Lead Assessment — Part 2</span>
-    <span>vLLM · EKS · KEDA · Istio · CBUAE</span>
-    <span>June 2026</span>
-  </footer>
+<p><strong>Full VPC endpoint set required:</strong> ECR (API + DKR), S3 (Gateway), Secrets Manager, KMS, STS, CloudWatch Logs, CloudWatch Metrics, SSM / SSMMessages / EC2Messages (no-SSH node access), EKS, EC2, Auto Scaling, ELB, SQS. Missing even one causes silent failures — kubelet cannot register, IRSA token refresh fails, or image pulls hang.</p>
+
+<h3>Audit logging for CBUAE AI governance framework</h3>
+<p>The CBUAE IT Governance Framework requires end-to-end traceability for AI-driven financial decisions:</p>
+<ul>
+  <li><strong>Immutable request logs:</strong> vLLM structured logging → CloudWatch Logs group with a resource policy denying <code>logs:DeleteLogGroup</code> and <code>logs:PutRetentionPolicy</code> — no operator can shorten or delete the audit trail</li>
+  <li><strong>User attribution:</strong> upstream API gateway injects <code>X-User-ID</code>, <code>X-Correlation-ID</code>; vLLM logs capture them per request; logs are non-repudiable</li>
+  <li><strong>Retention:</strong> 7 years — CloudWatch (hot, year 1) → S3 Intelligent-Tiering → S3 Glacier Deep Archive (years 2–7). SCPs block deletion on the audit log account.</li>
+  <li><strong>KMS CMK for all data at rest:</strong> EBS (model weights, ephemeral storage), EKS etcd secrets, ECR images, CloudWatch Logs — every <code>kms:Decrypt</code> event appears in CloudTrail with principal, timestamp, and resource ARN</li>
+  <li><strong>PII gate (Day 0 requirement):</strong> a redaction proxy between the API gateway and vLLM detects and masks PII before prompts are logged — without this, audit logs become a PII breach</li>
+</ul>
+</div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════ 05 -->
+<div class="sec">
+<div class="num">05</div>
+<div>
+<h2>100× Scale — What Breaks First, What Changes</h2>
+
+<div class="note red"><b>Key framing:</b> 100× overnight is not a software autoscaling problem. GPU capacity in <code>me-central-1</code> is physically finite. You cannot reliably procure 100 g6e.12xlarge nodes on short notice in a smaller AWS region. The solution requires architecture changes, serving efficiency improvements, and procurement planning in parallel.</div>
+
+<h3>Failure sequence — ordered by when each breaks</h3>
+<div class="tw"><table>
+  <thead><tr><th>#</th><th>What breaks</th><th>Root cause</th><th>Fix</th></tr></thead>
+  <tbody>
+    <tr>
+      <td class="m hl">1</td>
+      <td><strong>KEDA ceiling</strong> (<code>maxReplicaCount: 8</code>)</td>
+      <td>Hard config limit hit immediately at 100× — queue depth spikes, replicas saturate at 8, latency climbs without bound</td>
+      <td>Remove the ceiling. Let GPU supply (account quota) be the natural limit, not a config value. Add SLO-based alerting so humans are notified before queue depth becomes user-visible.</td>
+    </tr>
+    <tr>
+      <td class="m hl">2</td>
+      <td><strong>vLLM single-process throughput ceiling</strong></td>
+      <td>One vLLM process handles ~50–120 concurrent requests depending on context length. Long financial documents (32K tokens) drop this to ~10–20. 100× traffic needs 100× more processes — but naive horizontal scaling doesn't help if they all independently compute the same prefix.</td>
+      <td><strong>AIBrix becomes mandatory here.</strong> Its EnvoyProxy gateway does prefix-aware routing: requests sharing a common system prompt are sent to the pod most likely to have that prefix cached. For a financial chatbot where 80% of requests share the same 2K-token system prompt, this achieves 60–80% KV-cache hit rates — effectively 3–5× throughput per node without adding hardware.</td>
+    </tr>
+    <tr>
+      <td class="m hl">3</td>
+      <td><strong>Synchronous request path</strong></td>
+      <td>ALB → vLLM direct with no buffering. A traffic spike that takes 5 minutes to absorb (node provisioning + model load) causes client timeouts and cascading retries that amplify the spike.</td>
+      <td>Insert an <strong>SQS FIFO queue</strong> between the API gateway and vLLM. Decouple acceptance rate from serving rate. Clients receive a request ID immediately; results streamed via SSE or polled. Queue depth becomes the KEDA trigger, giving the cluster time to scale without dropping requests.</td>
+    </tr>
+    <tr>
+      <td class="m hl">4</td>
+      <td><strong>GPU node provisioning lag</strong></td>
+      <td>Even with Karpenter (~90 s), 20 new GPU nodes take 90 s (provision) + 5 min (model load) × however many run in parallel = 8–12 min to absorb the spike. Financial chatbots with SLA &lt;2 s p99 cannot wait 12 minutes.</td>
+      <td><strong>Warm pool:</strong> keep N nodes running with model weights pre-loaded on EFS PVC — no download on scale-out. Warm pods are ready in &lt;15 s. Size the pool to absorb the P95 ramp rate. Costs ~$16/hr per idle node but prevents latency SLO breach.</td>
+    </tr>
+    <tr>
+      <td class="m hl">5</td>
+      <td><strong>GPU procurement ceiling</strong></td>
+      <td><code>me-central-1</code> is a smaller AWS region. g6e.12xlarge default quota may be 8–16 vCPUs for new accounts. Even with quota increases, AWS cannot always fulfil 50+ GPU instance requests on-demand during high-demand periods.</td>
+      <td>Three-tier capacity (see below). Additionally: AIBrix disaggregated prefill/decode separates compute-bound (prefill) from memory-bandwidth-bound (decode) phases — each scaled independently. This alone can reduce required node count by 30–40% vs running unified pods.</td>
+    </tr>
+    <tr>
+      <td class="m hl">6</td>
+      <td><strong>Observability stack</strong></td>
+      <td>100 pods × vLLM high-cardinality metrics = millions of active Prometheus series → OOM. Loki single-distributor saturates at ~50 GB/hr ingestion.</td>
+      <td>Thanos sharded query + Ruler for Prometheus. Loki distributed mode (already scaffolded in prod values — increase replicas). Recording rules pre-aggregate high-cardinality series before storage.</td>
+    </tr>
+  </tbody>
+</table></div>
+
+<h3>GPU capacity planning — three procurement tiers</h3>
+<div class="tw"><table>
+  <thead><tr><th>Tier</th><th>Mechanism</th><th>Cost</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td class="hl">Committed base</td><td>1-year Reserved Instances or Compute Savings Plans for P50 traffic forecast</td><td>−40% vs on-demand</td><td>Always-on model replicas; AWS guarantees this capacity</td></tr>
+    <tr><td class="hl">Flex burst</td><td>EC2 Capacity Reservations (capacity held, billed only when launched)</td><td>On-demand price when used; reservation fee when empty</td><td>Absorb P90–P95 spikes without on-demand availability gamble</td></tr>
+    <tr><td class="hl">Spot burst</td><td>Karpenter Spot NodePool, diversified across g6e instance sizes</td><td>−60–70% vs on-demand</td><td>Async batch inference and cost-tolerant burst; not for real-time SLA</td></tr>
+    <tr><td class="hl">Managed fallback</td><td>Bedrock or OpenAI-compatible API behind a PII-scrubbing proxy</td><td>Per-token (expensive at volume)</td><td>P99 overflow or regional outage — keeps availability without violating CBUAE if PII is scrubbed before egress</td></tr>
+  </tbody>
+</table></div>
+
+<h3>Cost reality at 100×</h3>
+<div class="tw"><table>
+  <thead><tr><th>Scenario</th><th>Nodes</th><th>$/hr</th><th>$/month</th></tr></thead>
+  <tbody>
+    <tr><td>Current baseline (2 nodes)</td><td class="m">2</td><td class="m">$32.58</td><td class="m">$23,500</td></tr>
+    <tr><td>100× — naive linear scale</td><td class="m">200</td><td class="m">$3,258</td><td class="m">~$2.35M</td></tr>
+    <tr><td>100× — with AIBrix prefix caching (70% hit rate)</td><td class="m">25–35</td><td class="m">$407–$570</td><td class="m">~$293K–$410K</td></tr>
+    <tr><td class="hl">100× — AIBrix + disaggregated prefill + 1yr RI mix</td><td class="m">20 RI + 8–10 on-demand</td><td class="m hl">~$270</td><td class="m hl">~$194K</td></tr>
+  </tbody>
+</table></div>
+
+<div class="note green"><b>Key insight:</b> The architecture decision — vLLM alone vs AIBrix-orchestrated fleet — represents a &gt;$2M/month difference at 100× scale. Prefix-aware routing and disaggregated serving are not features, they are the cost model. This is why AIBrix is in the stack from day one rather than added later.</div>
+</div>
+</div>
+
+
+<div class="footer">
+  <span>MLOps Senior / Lead Assessment — Part 2 of 2</span>
+  <span>vLLM · AIBrix · EKS · KEDA · CBUAE Compliant</span>
+  <span>June 2026</span>
+</div>
 
 </div>

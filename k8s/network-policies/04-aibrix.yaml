@@ -1,0 +1,149 @@
+# NetworkPolicy for AIBrix system components.
+# AIBrix runs an EnvoyProxy gateway, controller-manager, metadata service,
+# and GPU optimizer. The gateway is the entry point for all inference traffic.
+---
+# EnvoyProxy gateway: receive external requests, route to vLLM pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aibrix-gateway-allow
+  namespace: aibrix-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: gateway
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # ALB → EnvoyProxy (single ingress point for all model traffic)
+    - ports:
+        - port: 10080
+          protocol: TCP
+        - port: 10443
+          protocol: TCP
+      from:
+        - ipBlock:
+            cidr: 10.0.0.0/8
+
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+
+    # Route inference requests to vLLM pods
+    - ports:
+        - port: 8000
+          protocol: TCP
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: vllm
+          podSelector:
+            matchLabels:
+              app: vllm
+---
+# AIBrix controller-manager: watch CRDs, manage model routing config
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aibrix-controller-allow
+  namespace: aibrix-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: controller-manager
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # Webhook server (Kubernetes admission controller)
+    - ports:
+        - port: 9443
+          protocol: TCP
+      from:
+        - ipBlock:
+            cidr: 10.0.0.0/8
+
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+    # Kubernetes API
+    - ports:
+        - port: 443
+          protocol: TCP
+      to:
+        - ipBlock:
+            cidr: 10.0.0.0/8
+    # Metadata service (KV-cache state, prefix routing decisions)
+    - ports:
+        - port: 8080
+          protocol: TCP
+      to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: metadata-service
+---
+# AIBrix metadata service: track KV-cache state across vLLM pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aibrix-metadata-allow
+  namespace: aibrix-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: metadata-service
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    - ports:
+        - port: 8080
+          protocol: TCP
+      from:
+        - podSelector: {}   # any aibrix-system pod
+
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+    # Poll vLLM /metrics to track KV-cache state per pod
+    - ports:
+        - port: 8000
+          protocol: TCP
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: vllm

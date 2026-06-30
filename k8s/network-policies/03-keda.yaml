@@ -1,0 +1,111 @@
+# NetworkPolicy for KEDA controller and metrics adapter.
+# KEDA needs:
+#   - Kubernetes API access (to manage HPA objects)
+#   - Prometheus access (ScaledObject triggers query Prometheus)
+#   - VPC endpoints (AWS SQS scaler — future queue-depth scaling)
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keda-operator-allow
+  namespace: keda
+spec:
+  podSelector:
+    matchLabels:
+      app: keda-operator
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # Metrics server healthcheck from kube-apiserver
+    - ports:
+        - port: 8080
+          protocol: TCP
+      from:
+        - ipBlock:
+            cidr: 10.0.0.0/8
+
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+
+    # Kubernetes API server (manage HPA objects, read ScaledObject CRDs)
+    - ports:
+        - port: 443
+          protocol: TCP
+      to:
+        - ipBlock:
+            cidr: 10.0.0.0/8
+
+    # Prometheus scaler — query metrics to evaluate trigger thresholds
+    - ports:
+        - port: 9090
+          protocol: TCP
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+
+    # SQS scaler (future — queue-depth trigger for async inference)
+    - ports:
+        - port: 443
+          protocol: TCP
+      to:
+        - ipBlock:
+            cidr: 10.0.0.0/8
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keda-metrics-adapter-allow
+  namespace: keda
+spec:
+  podSelector:
+    matchLabels:
+      app: keda-metrics-apiserver
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # kube-apiserver aggregation layer queries the metrics adapter for HPA scaling decisions
+    - ports:
+        - port: 6443
+          protocol: TCP
+      from:
+        - ipBlock:
+            cidr: 10.0.0.0/8
+
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+    - ports:
+        - port: 443
+          protocol: TCP
+      to:
+        - ipBlock:
+            cidr: 10.0.0.0/8

@@ -22,6 +22,18 @@ variable "vpc_cidr" {
   default     = "10.0.0.0/16"
 }
 
+variable "enable_public_subnets" {
+  description = "Create public subnets and IGW. False for air-gapped bank deployments."
+  type        = bool
+  default     = false
+}
+
+variable "enable_nat_gateway" {
+  description = "Create NAT gateways. False for air-gapped bank deployments."
+  type        = bool
+  default     = false
+}
+
 variable "kubernetes_version" {
   description = "EKS Kubernetes version"
   type        = string

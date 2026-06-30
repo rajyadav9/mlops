@@ -1,8 +1,15 @@
 name               = "mlops"
 environment        = "prod"
-region             = "us-east-1"
+# UAE region — enforced by SCP; all data stays in-country (CBUAE compliance)
+region             = "me-central-1"
 vpc_cidr           = "10.0.0.0/16"
 kubernetes_version = "1.29"
+
+# Air-gapped network — no internet path for GPU nodes.
+# All AWS service traffic routes through VPC endpoints only.
+# NetworkPolicies in k8s/network-policies/ provide a second enforcement layer.
+enable_public_subnets  = false
+enable_nat_gateway     = false
 
 # Set to true only during initial bootstrap; lock down after
 enable_public_endpoint = false

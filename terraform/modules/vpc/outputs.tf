@@ -8,6 +8,7 @@ output "private_subnet_ids" {
 
 output "public_subnet_ids" {
   value = aws_subnet.public[*].id
+  # Empty list when enable_public_subnets = false (air-gapped bank deployment)
 }
 
 output "vpc_cidr" {
