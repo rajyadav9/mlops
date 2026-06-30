@@ -38,7 +38,7 @@ qwen:
   modelName: "qwen-3-14b"
   servedModelName: "qwen-3-14b"
 
-  tensorParallelSize: "1"   # 1 GPU per pod (g4dn.xlarge, T4)
+  tensorParallelSize: "2"   # TP=2 on g6e.12xlarge (4× L40S); set to 4 for 72B models
   pipelineParallelSize: "1"
 
   maxModelLen: "32768"

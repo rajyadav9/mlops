@@ -182,8 +182,8 @@ resource "aws_eks_node_group" "system" {
 }
 
 # --- GPU Node Group ---
-# Instance: g4dn.xlarge = 4 vCPU, 16GB RAM, 1x NVIDIA T4 (16GB VRAM)
-# Uses AL2_x86_64_GPU AMI which ships NVIDIA drivers + containerd + nvidia-container-runtime
+# Default: g6e.12xlarge = 48 vCPU, 192 GB RAM, 4× NVIDIA L40S (192 GB VRAM total)
+# AL2_x86_64_GPU AMI ships NVIDIA drivers + containerd + nvidia-container-runtime pre-installed
 resource "aws_eks_node_group" "gpu" {
   cluster_name    = aws_eks_cluster.main.name
   node_group_name = "gpu"

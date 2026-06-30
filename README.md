@@ -277,7 +277,7 @@ On every merge to `main`: CI builds the GPU Docker image, pushes to ECR with an 
 | Local (kind)            | AWS Production                          |
 |-------------------------|-----------------------------------------|
 | kind cluster            | EKS (managed control plane)            |
-| Worker node (CPU)       | g4dn.xlarge node group (NVIDIA T4 GPU) |
+| Worker node (CPU)       | g6e.12xlarge GPU node group (4× NVIDIA L40S) |
 | localhost:5001 registry | Amazon ECR (immutable tags, scan on push) |
 | Kubernetes Secrets      | AWS Secrets Manager via IRSA           |
 | NGINX ingress           | AWS Load Balancer Controller (ALB)     |

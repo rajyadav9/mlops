@@ -155,13 +155,13 @@ In a batch processing scenario (nightly document analysis, not user-facing), sca
 
 ### 4.3 Node autoscaling
 
-KEDA handles pod autoscaling. For **node** autoscaling, Karpenter (see §8) is the right answer — it's aware of GPU taints and can provision a g4dn.xlarge in ~90 seconds vs ~5 minutes for managed node group ASG warm-up.
+KEDA handles pod autoscaling. For **node** autoscaling, Karpenter (see §8) is the right answer — it's aware of GPU taints and can provision a g6e.12xlarge in ~90 seconds vs ~5 minutes for managed node group ASG warm-up.
 
 In this repository, the GPU node group uses `min_size = 0 / desired_size = 1` with a Terraform `lifecycle { ignore_changes = [desired_size] }` so the Cluster Autoscaler (or Karpenter) can manage scale-down without Terraform fighting it.
 
 ### 4.4 Cooldown tuning
 
-300-second scale-down cooldown is intentionally conservative. GPU nodes are expensive to start and models are expensive to load. Premature scale-down followed by a traffic spike means users wait minutes for a warm pod. At $0.53/hr a g4dn.xlarge costs ~$0.009 per idle 60 seconds — a cheap insurance policy against latency spikes.
+300-second scale-down cooldown is intentionally conservative. GPU nodes are expensive to start and models are expensive to load. Premature scale-down followed by a traffic spike means users wait minutes for a warm pod. At $16.29/hr a g6e.12xlarge costs ~$0.27 per idle 60 seconds — still a cheap insurance policy against latency spikes when compared to the cost of a degraded user experience in a regulated financial product.
 
 ---
 
